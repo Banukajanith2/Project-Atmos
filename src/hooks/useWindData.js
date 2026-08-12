@@ -62,7 +62,7 @@ function samplesFromResponse(payload) {
  *
  * StrictMode in development mounts, unmounts, then remounts. A per-component
  * "already fetching" ref cannot stop the duplicate, because the cleanup that
- * clears it runs *before* the second mount's effect — you get two real requests
+ * clears it runs *before* the second mount's effect - you get two real requests
  * and one of them shows up aborted. Deduping at module scope is what actually
  * keeps development from double-hitting a rate-limited public API.
  *
@@ -90,7 +90,7 @@ function requestGrid() {
       if (!response.ok) {
         throw new Error(payload?.reason || `HTTP ${response.status}`);
       }
-      // A rate-limit reply arrives as {error: true, reason: "..."} — and can do
+      // A rate-limit reply arrives as {error: true, reason: "..."} - and can do
       // so with a 200, so response.ok alone is not enough to trust the body.
       if (!Array.isArray(payload)) {
         throw new Error(payload?.reason || 'Unexpected response shape');
@@ -118,7 +118,7 @@ function requestGrid() {
 /**
  * Fetches the global wind grid once, caches it, and refreshes on an interval.
  *
- * Never call this from inside `useFrame` — one request covers the whole globe
+ * Never call this from inside `useFrame` - one request covers the whole globe
  * and the particle system reads the cached field, not the network.
  */
 export function useWindData() {
@@ -172,7 +172,7 @@ export function useWindData() {
     let unmounted = false;
     const isStale = () => unmounted;
 
-    // A cached grid that is still fresh is reused as-is — no request at all.
+    // A cached grid that is still fresh is reused as-is - no request at all.
     if (cached && Date.now() - cached.at < REFETCH_MS) {
       setState({
         field: cached.field,

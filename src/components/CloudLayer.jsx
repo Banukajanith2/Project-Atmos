@@ -37,7 +37,7 @@ export function createGridTexture(values) {
   const texture = new THREE.DataTexture(data, N_LON, N_LAT, THREE.RGBAFormat);
   texture.needsUpdate = true;
 
-  // Smooth between cells — nearest-neighbour would draw 10° checkerboards.
+  // Smooth between cells - nearest-neighbour would draw 10° checkerboards.
   texture.magFilter = THREE.LinearFilter;
   texture.minFilter = THREE.LinearFilter;
   texture.generateMipmaps = false;
@@ -58,7 +58,7 @@ export function createGridTexture(values) {
  * Cloud cover as a translucent white shell over the basemap.
  *
  * Coverage is a state, not a phenomenon with motion, so this does not simulate
- * anything — it just blends. There is a barely-perceptible drift because the
+ * anything - it just blends. There is a barely-perceptible drift because the
  * brief asks for it; note that drifting the texture does slowly decouple the
  * clouds from the coordinates they were measured at, so it is kept tiny
  * (a few degrees across a whole refresh interval).

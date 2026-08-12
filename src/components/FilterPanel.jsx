@@ -2,7 +2,7 @@
  * Layer toggles.
  *
  * Capped rather than unlimited: six simultaneous layers on one globe is not a
- * richer view, it is an unreadable one — falling rain, drifting snow, flowing
+ * richer view, it is an unreadable one - falling rain, drifting snow, flowing
  * wind and two surface washes all compete for the same pixels. The cap is
  * enforced as "oldest selection drops off" so a tap always does something,
  * instead of silently refusing the input.
@@ -38,7 +38,7 @@ export default function FilterPanel({ active, onToggle, maxActive }) {
       </div>
       <p className="filters__hint">
         {maxActive === 1
-          ? 'Reduced quality — one layer at a time'
+          ? 'Reduced quality - one layer at a time'
           : `Up to ${maxActive} layers at once`}
       </p>
     </div>

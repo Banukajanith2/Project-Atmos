@@ -40,7 +40,7 @@ const fragmentShader = /* glsl */ `
 
 /**
  * Reusable falling-streak system. Exported so ThunderLayer can render the same
- * precipitation motion without duplicating it — the prompt specifies thunder as
+ * precipitation motion without duplicating it - the prompt specifies thunder as
  * "the rain layer's motion, plus flashes".
  */
 export function PrecipStreaks({

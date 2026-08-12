@@ -1,7 +1,7 @@
 # Project Atmos
 
 A real-time 3D Earth showing live global surface wind as animated particle
-streaks. No API key, no backend, no paid services — the build output is static
+streaks. No API key, no backend, no paid services - the build output is static
 files.
 
 Visual reference: [earth.nullschool.net](https://earth.nullschool.net),
@@ -30,17 +30,17 @@ Pages). No server runtime, no environment variables, nothing to configure.
 |---|---|---|
 | Bundler | Vite + React | No routing, SSR, or backend to justify Next.js |
 | 3D | `@react-three/fiber` + `@react-three/drei` | React renderer for Three.js; drei supplies `OrbitControls` |
-| Data | plain `fetch` | One endpoint — a data-fetching library would be dead weight |
+| Data | plain `fetch` | One endpoint - a data-fetching library would be dead weight |
 
 ## Data source
 
-[Open-Meteo](https://open-meteo.com) forecast API — free, no key, no signup
+[Open-Meteo](https://open-meteo.com) forecast API - free, no key, no signup
 (10,000 calls/day, non-commercial).
 
 The API is **per-point**; there is no "whole world" wind grid endpoint. The
 global grid is therefore built here and requested in a single batched call:
 
-- 10° spacing, latitude −80…80, longitude −180…170 → **612 points**, under
+- 10° spacing, latitude -80…80, longitude -180…170 → **612 points**, under
   Open-Meteo's 1,000-locations-per-request cap.
 - `current=wind_speed_10m,wind_direction_10m`
 - One request on mount, then a refetch every 30 minutes. Never per frame.
@@ -67,7 +67,7 @@ src/
     CityMarker.jsx          reticle, label, current-conditions badge
     SearchBar.jsx           debounced search + disambiguation list
     FilterPanel.jsx         layer toggles
-    HUD.jsx                 plain DOM overlay — deliberately not inside <Canvas>
+    HUD.jsx                 plain DOM overlay - deliberately not inside <Canvas>
   hooks/
     useWindData.js          grid fetch + cache + interval refetch + fallback
     useCitySearch.js        debounced geocoding
@@ -84,7 +84,7 @@ React renders the scene graph once and then gets out of the way.
 
 ### The wind field
 
-`wind_direction_10m` is *meteorological* — the bearing the wind is coming
+`wind_direction_10m` is *meteorological* - the bearing the wind is coming
 **from**. The motion vector is the reverse:
 
 ```
@@ -93,17 +93,17 @@ v (northward) = -speed · cos(direction)
 ```
 
 Sampling is **bilinear** across the four surrounding grid points. The `u`/`v`
-components are interpolated rather than speed and bearing — averaging *angles*
+components are interpolated rather than speed and bearing - averaging *angles*
 across the 359°→1° seam would swing a particle the long way round the compass.
 
 Longitude is treated as **circular**: the neighbour of the 170° column is the
-−180° column, so there is no seam at the antimeridian. Latitude neighbours
+-180° column, so there is no seam at the antimeridian. Latitude neighbours
 clamp instead, because no row exists past ±80°.
 
 ### Particle streaks
 
-Each particle is drawn as a short trail of points — one live head plus a
-ring buffer of frozen past positions — which is what turns a field of dots into
+Each particle is drawn as a short trail of points - one live head plus a
+ring buffer of frozen past positions - which is what turns a field of dots into
 directional streaks. All particles' slots share **one** `BufferGeometry` and
 **one** `THREE.Points` object, so it stays a single draw call.
 
@@ -118,13 +118,13 @@ animation, never the speeds reported in the HUD.
 
 ### Adaptive quality
 
-Capability probe on mount — `navigator.deviceMemory`, `hardwareConcurrency`,
-and `prefers-reduced-motion` — followed by a live frame-time probe that
+Capability probe on mount - `navigator.deviceMemory`, `hardwareConcurrency`,
+and `prefers-reduced-motion` - followed by a live frame-time probe that
 downgrades once if the device sustains under 38 fps.
 
 The runtime probe matters because `deviceMemory` is Chromium-only: iOS Safari
 reports nothing, so a missing value has to mean *unknown*, not *fast*. This is
-**capability detection, never brand detection** — an old iPhone under Safari's
+**capability detection, never brand detection** - an old iPhone under Safari's
 memory-pressure eviction chokes on a scene a new one handles fine, and the user
 agent cannot tell you which one you have.
 
@@ -143,8 +143,8 @@ reasoning is not lost the next time someone "simplifies" one of them.
 
 | Issue | Fix |
 |---|---|
-| Blank canvas, no error | `useLoader` suspends — missing `<Suspense>` blanks the canvas silently. Boundary lives in `App.jsx`. |
-| Texture CORS / 404 failure | CDN URL verified to return `200` + `access-control-allow-origin: *` before wiring it in. Note the three.js `examples/textures/planets/...` paths on unpkg and jsdelivr now **404** — they are not published inside the npm package. |
+| Blank canvas, no error | `useLoader` suspends - missing `<Suspense>` blanks the canvas silently. Boundary lives in `App.jsx`. |
+| Texture CORS / 404 failure | CDN URL verified to return `200` + `access-control-allow-origin: *` before wiring it in. Note the three.js `examples/textures/planets/...` paths on unpkg and jsdelivr now **404** - they are not published inside the npm package. |
 | Texture fails anyway | A thrown loader error does not land in a Suspense fallback. `Globe.jsx` has a real error boundary that swaps in a flat dark material, and the HUD says so. |
 | Particle animation janky | `BufferAttribute` arrays mutated in `useFrame` with `needsUpdate = true`. Per-frame positions in `useState` would re-render React at 60 Hz. |
 | Duplicate fetch in dev console | Expected StrictMode double-invoke, not a bug. Guarded by an `AbortController` plus an in-flight ref so it does not double-hit the API. |
@@ -152,10 +152,10 @@ reasoning is not lost the next time someone "simplifies" one of them.
 | Breakage at the poles | Hard exclusion at ±80° with an opacity fade from ±66°, so the cutoff is a soft horizon rather than a ring of vanishing particles. |
 | Breakage at the antimeridian | Circular longitude interpolation. Folding ±180° is continuous in 3D, so trails do not smear across the globe at the seam. |
 | Open-Meteo unreachable | `try`/`catch` with a synthetic banded-zonal-flow fallback field, so the globe is never empty. Error surfaced in the HUD. |
-| Rate limit returns **200** | A rate-limited reply is `{error: true, reason: "..."}` and can arrive with a 200 status, so `response.ok` alone is not enough — the body shape is validated too. |
+| Rate limit returns **200** | A rate-limited reply is `{error: true, reason: "..."}` and can arrive with a 200 status, so `response.ok` alone is not enough - the body shape is validated too. |
 | A refresh fails after a good fetch | Last good field is kept and the HUD flags the stale refresh, rather than throwing away live data for synthetic. |
 | iOS Safari killed under memory pressure | Capability probe + live frame-time probe. Never a brand check. |
-| Canvas jumps on resize | `<Canvas>` owns resize. Nothing else calls `setSize`/`setPixelRatio` — a second writer fights it. |
+| Canvas jumps on resize | `<Canvas>` owns resize. Nothing else calls `setSize`/`setPixelRatio` - a second writer fights it. |
 | Hammering the API | One batched request on mount + 30-minute interval, cleaned up on unmount. Never inside `useFrame`. |
 | Camera clipping through the globe | `minDistance`/`maxDistance` clamped on `OrbitControls`. |
 | Camera flies through the globe, or the long way round, on antimeridian-crossing searches | Quaternion slerp of the camera *direction*, never a lat/lon or xyz lerp. Lerping lat/lon sends 175°E → 175°W the 350° way; lerping xyz cuts a chord through the planet's interior. |
@@ -163,9 +163,9 @@ reasoning is not lost the next time someone "simplifies" one of them.
 | Zoomed-in city view looks pixelated | `minDistance` derived from the basemap's real texel density (see above), not chosen by feel. |
 | Ambiguous city names resolve to the wrong place silently | Region and country always shown; selection is always explicit. |
 | Geocoding request on every keystroke | 300 ms debounce plus a query cache in `useCitySearch.js`. Verified: 11 keystrokes → 1 request. |
-| Geocoding "no match" crashes the dropdown | A query with no results answers **200 with the `results` key absent entirely** — not an empty array — so the shape is validated rather than assumed. |
+| Geocoding "no match" crashes the dropdown | A query with no results answers **200 with the `results` key absent entirely** - not an empty array - so the shape is validated rather than assumed. |
 | Out-of-order search responses overwrite newer ones | Each lookup carries a request id; a stale response is discarded. |
-| City badge disagrees with the ambient grid at that point | Expected — different fidelities. Labelled "current conditions" rather than reconciled. |
+| City badge disagrees with the ambient grid at that point | Expected - different fidelities. Labelled "current conditions" rather than reconciled. |
 | Misclassified conditions (drizzle shown as thunder) | Explicit WMO code sets, not range guesses. Covered by per-code tests. |
 | All layers on at once becomes visual noise | Capped at 3 (1 in reduced quality); the oldest selection is evicted rather than the tap ignored. |
 | Frame drops from layers that are toggled off | Layers are unmounted, not hidden, so their `useFrame` stops entirely. |
@@ -187,8 +187,8 @@ Deliberately **not** a pure-black backdrop. Flat `#000` flattens the globe and
 turns every panel edge into a hairline diagram; the background is a layered blue
 gradient instead, and the panels are translucent glass that picks it up.
 
-Glass is applied **selectively** — to the floating panels only, never the whole
-page — which is what keeps it reading as current rather than 2020. Corners are
+Glass is applied **selectively** - to the floating panels only, never the whole
+page - which is what keeps it reading as current rather than 2020. Corners are
 18 px, type is plain Inter at readable sizes rather than letterspaced caps and
 monospace telemetry, and numbers use `tabular-nums` so values that change every
 frame do not reflow their row.
@@ -198,19 +198,19 @@ button opts back in.
 
 The particle colour ramp and the HUD legend read from the same `SPEED_STOPS`
 array in `windField.js`, so the two cannot drift apart. Its low stop is tuned to
-stay visible over sunlit land — a near-black "calm" colour disappears against
+stay visible over sunlit land - a near-black "calm" colour disappears against
 the basemap under additive blending.
 
 ## Controls
 
-- **Drag** to rotate, **scroll** or the **+ / −** buttons to zoom. Zoom steps are
+- **Drag** to rotate, **scroll** or the **+ / -** buttons to zoom. Zoom steps are
   multiplicative, so each press covers the same proportion of the remaining
-  distance — a fixed step is a nudge when far out and a lurch when already close.
+  distance - a fixed step is a nudge when far out and a lurch when already close.
 - Auto-rotate resumes after 3.5 s idle.
 - **Compass button** resets to north, the way Google Earth's compass behaves: it
   levels the tilt so the pole points up the screen, without teleporting you to a
   different part of the world. OrbitControls never rolls the camera, so the polar
-  angle is the only thing that can put north off-vertical — that is animated back
+  angle is the only thing that can put north off-vertical - that is animated back
   to the equator while azimuth and zoom are left exactly where you left them.
 - All camera animations (flight, reset, zoom) share **one** animation slot, so
   starting any of them cancels the others instead of two of them fighting over
@@ -218,7 +218,7 @@ the basemap under additive blending.
 
 ### Zoom limits are set by the texture, not by feel
 
-The basemap is 4096 px around 360° of longitude — about 652 px per world unit at
+The basemap is 4096 px around 360° of longitude - about 652 px per world unit at
 the equator. With a 42° vertical FOV, magnification passes 1:1 at roughly
 `distance = 2.8` on a 900 px-tall window, which is far enough out that enforcing
 it strictly would forbid zooming at all. `minDistance` is therefore **1.75**,
@@ -232,7 +232,7 @@ no key. Typing is debounced 300 ms and completed queries are cached, so spelling
 "Springfield" costs **one** request, not eleven.
 
 Results **always** show region and country. There is deliberately no path that
-jumps to the top hit when several matches exist — "Springfield" matches a dozen
+jumps to the top hit when several matches exist - "Springfield" matches a dozen
 real places, and silently flying to the most populous one is a wrong answer
 delivered confidently.
 
@@ -245,17 +245,17 @@ one is being read.
 
 The marker is a **locator reticle, not a city boundary**. Real administrative
 limits need a separate polygon dataset (Natural Earth, OSM boundaries) that the
-weather API does not carry — a valid future enhancement, out of scope here.
+weather API does not carry - a valid future enhancement, out of scope here.
 
 ## Weather layers
 
-All six read from the *same* batched 612-point grid request as the wind field —
+All six read from the *same* batched 612-point grid request as the wind field -
 `weather_code`, `precipitation`, `cloud_cover` and `temperature_2m` were added to
 the existing call, so the extra layers cost zero additional API budget.
 
 | Layer | Rendering | Why it is not a recolour |
 |---|---|---|
-| Wind | Point trails along the interpolated vector field | — |
+| Wind | Point trails along the interpolated vector field | - |
 | Rain | `LineSegments` anchored to the radial | A line has an axis; anchoring it to "straight down" reads as falling from any camera angle |
 | Thunderstorm | Rain's motion, plus flash sprites | Each cell owns its countdown and duration, so storms never strobe in unison |
 | Snow | Round points, ⅓ the fall speed, per-flake lateral wander | Recolouring rain white just produces white rain |
@@ -263,7 +263,7 @@ the existing call, so the extra layers cost zero additional API budget.
 | Clouds | Translucent white shell, opacity from `cloud_cover` | Coverage is a state, not a particle phenomenon |
 
 Layers are capped at **3 at once** (1 in reduced-quality mode). Going past the cap
-drops the *oldest* selection rather than rejecting the tap — a button that
+drops the *oldest* selection rather than rejecting the tap - a button that
 visibly does nothing reads as broken.
 
 Each layer is **unmounted** when toggled off, not hidden. Unmounting is the
@@ -283,8 +283,8 @@ temperature competing with the blue basemap and the cyan wind ramp. Change
 ### WMO code buckets
 
 `utils/weatherCodes.js` maps codes as explicit sets, not ranges. The numbering is
-not contiguous by condition — 77 (snow grains) sits between 71–75 (snowfall) and
-85–86 (snow showers) — so "code > 70 means snow" style shortcuts misclassify.
+not contiguous by condition - 77 (snow grains) sits between 71-75 (snowfall) and
+85-86 (snow showers) - so "code > 70 means snow" style shortcuts misclassify.
 Codes 56/57 (freezing drizzle) are absent from the brief's list and are grouped
 with rain here, since they are precipitation and would otherwise render as
 nothing.

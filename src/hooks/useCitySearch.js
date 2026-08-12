@@ -11,8 +11,8 @@ const cache = new Map();
 /**
  * Debounced city lookup against Open-Meteo's geocoding API.
  *
- * Without the debounce this fires once per keystroke — eight requests to spell
- * "Auckland" — which is both wasteful and racy, since responses can land out of
+ * Without the debounce this fires once per keystroke - eight requests to spell
+ * "Auckland" - which is both wasteful and racy, since responses can land out of
  * order and leave the dropdown showing matches for a prefix the user has
  * already moved past.
  */
@@ -38,7 +38,7 @@ export function useCitySearch(query) {
       const payload = await response.json();
 
       // A query with no matches answers 200 with the `results` key absent
-      // entirely — not an empty array — so this cannot assume the field exists.
+      // entirely - not an empty array - so this cannot assume the field exists.
       const results = Array.isArray(payload?.results) ? payload.results : [];
       cache.set(key, results);
 
@@ -71,7 +71,7 @@ export function useCitySearch(query) {
   return state;
 }
 
-/** "Springfield, Illinois, United States" — never just "Springfield". */
+/** "Springfield, Illinois, United States" - never just "Springfield". */
 export function describePlace(place) {
   return [place.name, place.admin1, place.country].filter(Boolean).join(', ');
 }

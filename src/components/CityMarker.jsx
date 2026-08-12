@@ -13,7 +13,7 @@ const PULSE_PERIOD = 2.4; // seconds
  * A locator reticle, not a city boundary.
  *
  * Actual administrative limits would need a separate polygon dataset (Natural
- * Earth, OSM boundaries) that the weather API does not carry — see README. A
+ * Earth, OSM boundaries) that the weather API does not carry - see README. A
  * pulsing ring at the exact coordinate communicates the same thing at this
  * zoom level for none of the payload.
  */
@@ -50,7 +50,7 @@ export default function CityMarker({ place, weather }) {
       pulseRef.current.material.opacity = (1 - t) * 0.7;
     }
 
-    // The globe is opaque, so a marker on the far side must be hidden — the
+    // The globe is opaque, so a marker on the far side must be hidden - the
     // label is an HTML overlay and would otherwise float over the planet with
     // nothing to attach it to.
     toCamera.copy(camera.position).sub(position).normalize();
@@ -96,7 +96,7 @@ export default function CityMarker({ place, weather }) {
                 <span className="marker__cond">{condition}</span>
                 <span className="marker__wind">{Math.round(windSpeed)} km/h wind</span>
                 {/* Labelled, because this is a point reading and the ambient
-                    layer is a smoothed 10° field — they will differ. */}
+                    layer is a smoothed 10° field - they will differ. */}
                 <span className="marker__source">Current conditions</span>
               </div>
             )}

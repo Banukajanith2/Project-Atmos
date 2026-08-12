@@ -13,7 +13,7 @@ const SNOW_CATEGORIES = [CATEGORY.SNOW];
 /**
  * Snow is deliberately built on different primitives from rain: round points
  * rather than line segments, a third of the fall speed, and a per-flake lateral
- * wander. Recolouring the rain streaks white would produce white rain — the
+ * wander. Recolouring the rain streaks white would produce white rain - the
  * motion, not the colour, is what distinguishes the two.
  */
 

@@ -14,7 +14,7 @@ const CURRENT_FIELDS = [
  * Single-point current conditions for a selected city.
  *
  * Deliberately a separate request from the ambient grid. The grid is 10° spacing
- * — roughly 1,100 km between samples — so its interpolated value at a city is a
+ * - roughly 1,100 km between samples - so its interpolated value at a city is a
  * smoothed regional field, not that city's weather. These two numbers are
  * allowed to disagree and no attempt is made to reconcile them; the marker badge
  * is labelled "current conditions" so it is clear which one is being read.

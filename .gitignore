@@ -3,3 +3,6 @@ dist/
 .vite/
 *.local
 .DS_Store
+
+# Local working notes, not shared
+CLAUDE.md

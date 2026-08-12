@@ -70,7 +70,7 @@ body {
 }
 
 /* ------------------------------------------------------------------ *
- * HUD — plain DOM above the canvas, transparent to pointer events
+ * HUD - plain DOM above the canvas, transparent to pointer events
  * except where a control actually needs them.
  * ------------------------------------------------------------------ */
 
@@ -81,8 +81,8 @@ body {
   z-index: 10;
 }
 
-/* Glass is applied selectively — to the floating panels only, never to the
-   whole page — which is what keeps it feeling current rather than 2020. */
+/* Glass is applied selectively - to the floating panels only, never to the
+   whole page - which is what keeps it feeling current rather than 2020. */
 .card {
   position: fixed;
   padding: 16px 18px;
@@ -671,7 +671,7 @@ body {
     --edge: 12px;
   }
 
-  /* Telemetry and the full data card are the first things to go — they are
+  /* Telemetry and the full data card are the first things to go - they are
      supporting detail, not the point of the screen. */
   .hud__perf,
   .hud__data,

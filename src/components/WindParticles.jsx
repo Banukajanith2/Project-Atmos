@@ -7,7 +7,7 @@ import { GLOBE_RADIUS } from './Globe';
 const PARTICLE_RADIUS = GLOBE_RADIUS * 1.008;
 
 /**
- * Real surface wind moves ~10 m/s, which is ~0.0001°/s — invisible. This is the
+ * Real surface wind moves ~10 m/s, which is ~0.0001°/s - invisible. This is the
  * playback speed-up applied to the true field: purely a visual constant, tune
  * it for feel, it does not affect the speeds reported in the HUD.
  */
@@ -21,7 +21,7 @@ const METRES_PER_DEGREE = 111320;
  * every particle's slots live in the same BufferGeometry.
  *
  * A new trail sample is laid down every TAIL_SAMPLE_DT seconds rather than every
- * frame — at 60 fps a per-frame sample would be sub-pixel and the "streak" would
+ * frame - at 60 fps a per-frame sample would be sub-pixel and the "streak" would
  * collapse into a single blob.
  */
 const TAIL = 9;
@@ -38,7 +38,7 @@ const FADE_LAT = LAT_MAX - 14;
 
 const MAX_DELTA = 0.05; // a backgrounded tab returns one huge delta; clamp it
 const RESPAWN_TRIES = 4;
-const FAST_ENOUGH = 9; // m/s — stop searching for a windier respawn point
+const FAST_ENOUGH = 9; // m/s - stop searching for a windier respawn point
 
 const vertexShader = /* glsl */ `
   attribute vec3 aColor;
@@ -227,8 +227,8 @@ export default function WindParticles({ field, count }) {
         lon[i] += (sample.u * degPerMetre) / cosLat;
         lat[i] += sample.v * degPerMetre;
 
-        // Folding longitude back into range is continuous in 3D — ±180 map to the
-        // same point — so the trail does not smear across the globe at the seam.
+        // Folding longitude back into range is continuous in 3D - ±180 map to the
+        // same point - so the trail does not smear across the globe at the seam.
         if (lon[i] > 180) lon[i] -= 360;
         else if (lon[i] < -180) lon[i] += 360;
       }

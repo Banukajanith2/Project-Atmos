@@ -21,7 +21,7 @@ import { latLonToVec3 } from './windField';
 
 export const FLIGHT_DURATION = 1.9; // seconds
 
-/** Ease in/out — no abrupt start or stop at either end of the arc. */
+/** Ease in/out - no abrupt start or stop at either end of the arc. */
 const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
 const _scratch = [0, 0, 0];

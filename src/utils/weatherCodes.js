@@ -1,7 +1,7 @@
 /**
  * WMO 4677 weather-code buckets.
  *
- * Written as explicit code sets rather than range guesses — the numbering is not
+ * Written as explicit code sets rather than range guesses - the numbering is not
  * contiguous by condition (77 is snow grains, sitting between 71-75 snowfall and
  * 85-86 snow showers), so "code > 70 means snow" style shortcuts misclassify.
  */
@@ -31,7 +31,7 @@ const CLOUDY = [2, 3];
 const FOG = [45, 48];
 const RAIN = [
   51, 53, 55, // drizzle
-  56, 57, // freezing drizzle — precipitation, so grouped with rain
+  56, 57, // freezing drizzle - precipitation, so grouped with rain
   61, 63, 65, // rain
   66, 67, // freezing rain
   80, 81, 82, // rain showers

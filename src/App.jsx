@@ -12,7 +12,7 @@ import HUD from './components/HUD';
 import { useWindData } from './hooks/useWindData';
 import { useCityWeather } from './hooks/useCityWeather';
 
-// `particles` counts streaks, not vertices — each one is drawn as a short trail
+// `particles` counts streaks, not vertices - each one is drawn as a short trail
 // of points (see WindParticles TAIL), all inside the same single geometry.
 // `precip` is the per-layer budget for rain/snow/thunder drops.
 const QUALITY = {
@@ -28,7 +28,7 @@ const DEFAULT_LAYERS = ['wind'];
 
 /**
  * Capability probe, never a brand check. `navigator.deviceMemory` is
- * Chromium-only — iOS Safari reports nothing at all — so a missing value must
+ * Chromium-only - iOS Safari reports nothing at all - so a missing value must
  * mean "unknown", not "fast". Whatever this misses is caught afterwards by the
  * live frame-time probe below.
  */
@@ -161,7 +161,7 @@ export default function App() {
         gl={{ antialias: quality.tier === 'high', powerPreference: 'high-performance', alpha: true }}
       >
         {/* <Canvas> owns resize handling. Do not call setSize/setPixelRatio
-            anywhere else — a second writer fights it and the view jumps. */}
+            anywhere else - a second writer fights it and the view jumps. */}
 
         {/* useLoader inside <Globe> suspends; this boundary is what keeps the
             canvas from silently rendering nothing while the texture downloads. */}

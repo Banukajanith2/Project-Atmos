@@ -1,5 +1,5 @@
 /**
- * windField.js — grid definition, vector math, and interpolation.
+ * windField.js - grid definition, vector math, and interpolation.
  *
  * Open-Meteo is a per-point API, so the "global grid" is something we build
  * ourselves out of one batched request. Everything downstream (particles, HUD
@@ -16,7 +16,7 @@ export const STEP = 10;
 
 export const N_LAT = (LAT_MAX - LAT_MIN) / STEP + 1; // 17 rows
 export const N_LON = 360 / STEP; // 36 columns, -180..170 (circular)
-export const GRID_POINTS = N_LAT * N_LON; // 612 — under Open-Meteo's 1000/call cap
+export const GRID_POINTS = N_LAT * N_LON; // 612 - under Open-Meteo's 1000/call cap
 
 const DEG2RAD = Math.PI / 180;
 const RAD2DEG = 180 / Math.PI;
@@ -24,7 +24,7 @@ const KMH_TO_MS = 1 / 3.6;
 
 /**
  * Grid coordinates in row-major order (latitude outer, longitude inner).
- * Index of (latIdx, lonIdx) is `latIdx * N_LON + lonIdx` — the same ordering
+ * Index of (latIdx, lonIdx) is `latIdx * N_LON + lonIdx` - the same ordering
  * the API response is mapped back into.
  */
 export function buildGrid() {
@@ -55,7 +55,7 @@ export function toVector(speedKmh, directionDeg) {
   return { u: -speed * Math.sin(rad), v: -speed * Math.cos(rad) };
 }
 
-/** Inverse of `toVector` — used to feed synthetic data through the same path. */
+/** Inverse of `toVector` - used to feed synthetic data through the same path. */
 export function toMeteorological(u, v) {
   const speedKmh = Math.hypot(u, v) / KMH_TO_MS;
   let dir = Math.atan2(-u, -v) * RAD2DEG;
@@ -106,7 +106,7 @@ export function createWindField(samples) {
    * bearing) is what keeps this correct across the 359°->1° seam; averaging
    * angles there would swing a particle the long way round the compass.
    *
-   * Returns null above ±80° — the poles are excluded from the grid entirely,
+   * Returns null above ±80° - the poles are excluded from the grid entirely,
    * and callers are expected to retire particles that drift into that band
    * rather than extrapolate into it.
    */
@@ -223,7 +223,7 @@ export function syntheticSamples() {
 
 /**
  * Tuned against the Blue Marble basemap, not a black backdrop. The low stop has
- * to stay bright enough to read over sunlit land and cloud — a near-black
+ * to stay bright enough to read over sunlit land and cloud - a near-black
  * "calm" colour simply disappears there under additive blending.
  */
 export const SPEED_STOPS = [

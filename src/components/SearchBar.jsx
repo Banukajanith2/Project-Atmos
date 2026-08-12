@@ -107,7 +107,7 @@ export default function SearchBar({ onSelect, selected, onClear }) {
                 onClick={() => choose(place)}
               >
                 <span className="search__city">{place.name}</span>
-                {/* Region and country are never omitted — they are the whole
+                {/* Region and country are never omitted - they are the whole
                     point of showing a list rather than auto-picking. */}
                 <span className="search__region">
                   {[place.admin1, place.country].filter(Boolean).join(', ')}

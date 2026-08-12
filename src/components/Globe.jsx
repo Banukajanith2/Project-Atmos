@@ -11,8 +11,8 @@ export const GLOBE_RADIUS = 1;
  * `content-type: image/jpeg`, and `access-control-allow-origin: *`, which is
  * what makes it usable as a WebGL texture. The equivalent three.js
  * example-texture paths on unpkg/jsdelivr
- * (`three@0.160.0/examples/textures/planets/...`) now 404 — they are not
- * published inside the npm package — so do not "restore" them here.
+ * (`three@0.160.0/examples/textures/planets/...`) now 404 - they are not
+ * published inside the npm package - so do not "restore" them here.
  *
  * It is 1.4 MB, the single heaviest asset in the app. The 93 KB `earth-dark.jpg`
  * alternative is far lighter but renders as near-black landmasses that are
@@ -36,7 +36,7 @@ function PlainGlobe({ dim = false }) {
 }
 
 function TexturedGlobe() {
-  // useLoader suspends. The <Suspense> boundary lives in App.jsx — without one,
+  // useLoader suspends. The <Suspense> boundary lives in App.jsx - without one,
   // the canvas goes blank with no error in the console.
   const texture = useLoader(THREE.TextureLoader, EARTH_TEXTURE_URL);
   const { gl } = useThree();
@@ -67,7 +67,7 @@ function TexturedGlobe() {
 
 /**
  * A thrown texture load (404, CORS, decode failure) does not land in a Suspense
- * fallback — it propagates as a render error, so it needs a real error boundary
+ * fallback - it propagates as a render error, so it needs a real error boundary
  * or it takes the whole canvas down with it.
  */
 class TextureBoundary extends Component {
@@ -122,7 +122,7 @@ const atmosphereFragment = /* glsl */ `
     // Note there is no "1.0 -" here, which is the counter-intuitive part.
     // We render the shell's BACK faces, so within the visible ring between the
     // planet's edge and the shell's silhouette this term is largest right at the
-    // planet and falls to zero outward — glow hugging the limb. Inverting it
+    // planet and falls to zero outward - glow hugging the limb. Inverting it
     // puts the maximum on the outer silhouette instead, which draws a detached
     // blue donut floating around the planet.
     float rim = abs(dot(normalize(vNormal), normalize(vView)));
@@ -166,8 +166,8 @@ const RESET_DURATION = 0.75; // seconds
  *
  * The texture is 4096 px around 360° of longitude, so it carries ~652 px per
  * world unit at the equator. With a 42° vertical FOV, a camera at distance d
- * spreads 0.768·(d−1) world units across the viewport height, and magnification
- * passes 1:1 at roughly d = 2.8 on a 900 px-tall window — far enough out that
+ * spreads 0.768·(d-1) world units across the viewport height, and magnification
+ * passes 1:1 at roughly d = 2.8 on a 900 px-tall window - far enough out that
  * enforcing it strictly would forbid zooming at all. 1.75 caps magnification at
  * about 2.5×, which linear filtering and anisotropy carry without the texture
  * visibly breaking into texels.
@@ -206,7 +206,7 @@ function Controls({ resetRef, flyToRef, zoomRef }) {
    * "Reset to north", the way Google Earth's compass behaves: level the tilt so
    * the north pole points up the screen, without teleporting the viewer to a
    * different part of the world. OrbitControls never rolls the camera, so the
-   * only thing that can put north off-vertical is the polar angle — drive that
+   * only thing that can put north off-vertical is the polar angle - drive that
    * back to the equator and leave azimuth and zoom exactly where the user left
    * them.
    */
@@ -229,7 +229,7 @@ function Controls({ resetRef, flyToRef, zoomRef }) {
 
   /**
    * Fly to a lat/lon. Auto-rotate is switched off for the duration and only
-   * re-armed by the normal idle timer afterwards — otherwise OrbitControls keeps
+   * re-armed by the normal idle timer afterwards - otherwise OrbitControls keeps
    * spinning the azimuth underneath the animation and the camera never actually
    * arrives where it was sent.
    */
@@ -259,8 +259,8 @@ function Controls({ resetRef, flyToRef, zoomRef }) {
 
   /**
    * Stepped zoom for the on-screen buttons. Multiplicative rather than additive
-   * so each press covers the same *proportion* of the remaining distance —
-   * a fixed −0.3 step is a nudge when far out and a lurch when already close.
+   * so each press covers the same *proportion* of the remaining distance -
+   * a fixed -0.3 step is a nudge when far out and a lurch when already close.
    * Clamped to the same limits the scroll wheel obeys.
    */
   useEffect(() => {

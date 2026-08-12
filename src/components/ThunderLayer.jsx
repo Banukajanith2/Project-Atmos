@@ -44,7 +44,7 @@ const fragmentShader = /* glsl */ `
  * Flash markers over thunderstorm cells.
  *
  * Each cell keeps its own countdown and its own flash duration. Driving them
- * from a single shared clock — a global sin() or one timer for the layer — makes
+ * from a single shared clock - a global sin() or one timer for the layer - makes
  * every storm on the planet strobe in unison, which instantly reads as a screen
  * effect rather than weather.
  */
@@ -123,7 +123,7 @@ function Flashes({ field, cells }) {
       if (elapsed[i] < duration[i]) {
         elapsed[i] += dt;
         const t = Math.min(1, elapsed[i] / duration[i]);
-        // Fast attack, slower decay — the shape of an actual lightning flash.
+        // Fast attack, slower decay - the shape of an actual lightning flash.
         alphas[i] = t < 0.18 ? t / 0.18 : Math.pow(1 - (t - 0.18) / 0.82, 2);
       } else {
         alphas[i] = 0;

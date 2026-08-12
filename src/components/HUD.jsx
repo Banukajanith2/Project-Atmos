@@ -10,12 +10,12 @@ const STATUS_LABEL = {
 };
 
 function formatClock(ms) {
-  if (!ms) return '—';
+  if (!ms) return '-';
   return new Date(ms).toISOString().slice(11, 16) + ' UTC';
 }
 
 function formatObserved(iso) {
-  if (!iso) return '—';
+  if (!iso) return '-';
   const [date, time] = iso.split('T');
   return `${date} · ${time} UTC`;
 }
@@ -167,7 +167,7 @@ export default function HUD({
       <section className="card hud__perf">
         <div className="stats stats--tight">
           <Stat label="Streaks" value={particleCount.toLocaleString()} accent />
-          <Stat label="Frame rate" value={fps ? `${fps} fps` : '—'} accent />
+          <Stat label="Frame rate" value={fps ? `${fps} fps` : '-'} accent />
           <Stat label="Quality" value={quality.tier === 'high' ? 'Full' : 'Reduced'} accent />
         </div>
       </section>

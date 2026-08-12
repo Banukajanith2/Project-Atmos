@@ -14,7 +14,7 @@ import { GLOBE_RADIUS } from './Globe';
  *
  * Tinted cool to sit inside the existing palette. The brief suggested a warm
  * rim-light, which would introduce a second accent temperature competing with
- * the blue globe and cyan wind — see README.
+ * the blue globe and cyan wind - see README.
  */
 const GLOW_COLOUR = '#cfeaff';
 

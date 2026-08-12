@@ -58,12 +58,24 @@ src/
   styles.css                design tokens + HUD layout
   components/
     Globe.jsx               sphere, texture, atmosphere, error boundary, controls
-    WindParticles.jsx       the particle system (single Points object)
+    WindParticles.jsx       the wind system (single Points object)
+    RainLayer.jsx           falling streaks + the reusable PrecipStreaks core
+    ThunderLayer.jsx        PrecipStreaks + independently-timed flashes
+    SnowLayer.jsx           slow drifting points
+    CloudLayer.jsx          cloud shell + the shared grid-texture builder
+    SunnyGlow.jsx           clear-sky wash
+    CityMarker.jsx          reticle, label, current-conditions badge
+    SearchBar.jsx           debounced search + disambiguation list
+    FilterPanel.jsx         layer toggles
     HUD.jsx                 plain DOM overlay — deliberately not inside <Canvas>
   hooks/
-    useWindData.js          fetch + cache + interval refetch + fallback
+    useWindData.js          grid fetch + cache + interval refetch + fallback
+    useCitySearch.js        debounced geocoding
+    useCityWeather.js       single-point precise fetch
   utils/
     windField.js            grid, vector math, bilinear interpolation, colour ramp
+    weatherCodes.js         WMO code -> condition buckets
+    cameraFlight.js         great-circle camera interpolation
 ```
 
 **One rule holds the whole thing together:** per-frame state never touches
@@ -146,6 +158,19 @@ reasoning is not lost the next time someone "simplifies" one of them.
 | Canvas jumps on resize | `<Canvas>` owns resize. Nothing else calls `setSize`/`setPixelRatio` — a second writer fights it. |
 | Hammering the API | One batched request on mount + 30-minute interval, cleaned up on unmount. Never inside `useFrame`. |
 | Camera clipping through the globe | `minDistance`/`maxDistance` clamped on `OrbitControls`. |
+| Camera flies through the globe, or the long way round, on antimeridian-crossing searches | Quaternion slerp of the camera *direction*, never a lat/lon or xyz lerp. Lerping lat/lon sends 175°E → 175°W the 350° way; lerping xyz cuts a chord through the planet's interior. |
+| Exactly antipodal flight produces NaN | `setFromUnitVectors` picks an arbitrary perpendicular axis for the 180° case; covered by a test. |
+| Zoomed-in city view looks pixelated | `minDistance` derived from the basemap's real texel density (see above), not chosen by feel. |
+| Ambiguous city names resolve to the wrong place silently | Region and country always shown; selection is always explicit. |
+| Geocoding request on every keystroke | 300 ms debounce plus a query cache in `useCitySearch.js`. Verified: 11 keystrokes → 1 request. |
+| Geocoding "no match" crashes the dropdown | A query with no results answers **200 with the `results` key absent entirely** — not an empty array — so the shape is validated rather than assumed. |
+| Out-of-order search responses overwrite newer ones | Each lookup carries a request id; a stale response is discarded. |
+| City badge disagrees with the ambient grid at that point | Expected — different fidelities. Labelled "current conditions" rather than reconciled. |
+| Misclassified conditions (drizzle shown as thunder) | Explicit WMO code sets, not range guesses. Covered by per-code tests. |
+| All layers on at once becomes visual noise | Capped at 3 (1 in reduced quality); the oldest selection is evicted rather than the tap ignored. |
+| Frame drops from layers that are toggled off | Layers are unmounted, not hidden, so their `useFrame` stops entirely. |
+| Auto-rotate fighting the search camera flight | Auto-rotate is disabled for the duration of any camera animation and re-armed only by the normal idle timer. |
+| Weather layers misaligned half a cell from their data | Grid textures correct for the half-texel offset (grid point 0 is the *centre* of texel 0) and rescale sphere V from ±90° to the grid's ±80°. |
 
 ## Design
 

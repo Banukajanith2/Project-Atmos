@@ -8,7 +8,7 @@
     "build": "vite build && npm run deploy",
     "build:only": "vite build",
     "preview": "vite preview",
-    "deploy": "gh-pages -d dist -b gh -t --nojekyll -m \"Deploy build\""
+    "deploy": "gh-pages -d dist -b gh -t --nojekyll -m \"Deploy build\" && git fetch -q origin gh && git --no-pager log -1 --format=\"gh branch is now: %h %s (%cr)\" origin/gh"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.8",

@@ -1,0 +1,726 @@
+/* ------------------------------------------------------------------ *
+ * Design tokens.
+ *
+ * Deliberately not pure black: a flat #000 backdrop flattens the globe and
+ * makes every panel edge look like a hairline diagram. The background is a
+ * layered blue gradient, and surfaces are translucent glass that picks it up.
+ * ------------------------------------------------------------------ */
+
+:root {
+  --bg-deep: #0b1120;
+  --bg-mid: #101c33;
+
+  --surface: rgba(255, 255, 255, 0.055);
+  --surface-hover: rgba(255, 255, 255, 0.09);
+  --border: rgba(255, 255, 255, 0.1);
+
+  --text: #f1f5f9;
+  --text-dim: #9aabc4;
+
+  --accent: #5fd0ff;
+  --accent-soft: rgba(95, 208, 255, 0.14);
+  --warn: #fbbf24;
+  --warn-soft: rgba(251, 191, 36, 0.13);
+
+  --font: 'Inter', system-ui, -apple-system, sans-serif;
+
+  --radius: 18px;
+  --radius-sm: 12px;
+  --shadow: 0 10px 34px rgba(2, 6, 23, 0.42);
+
+  --edge: 26px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-deep);
+  color: var(--text);
+  font-family: var(--font);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Soft off-centre light sources rather than a flat fill, so the globe sits in
+   an environment instead of floating on a void. */
+.app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(1100px 780px at 16% 8%, rgba(56, 132, 255, 0.2), transparent 62%),
+    radial-gradient(950px 720px at 86% 92%, rgba(95, 208, 255, 0.13), transparent 60%),
+    linear-gradient(158deg, var(--bg-mid) 0%, var(--bg-deep) 58%, #0d1526 100%);
+}
+
+.app canvas {
+  display: block;
+  touch-action: none;
+}
+
+/* ------------------------------------------------------------------ *
+ * HUD — plain DOM above the canvas, transparent to pointer events
+ * except where a control actually needs them.
+ * ------------------------------------------------------------------ */
+
+.hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* Glass is applied selectively — to the floating panels only, never to the
+   whole page — which is what keeps it feeling current rather than 2020. */
+.card {
+  position: fixed;
+  padding: 16px 18px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
+.card__title {
+  margin: 0 0 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.hud__brand {
+  top: var(--edge);
+  left: var(--edge);
+  padding: 14px 20px 14px 16px;
+}
+.hud__data {
+  top: var(--edge);
+  right: var(--edge);
+  width: 268px;
+}
+.hud__legend {
+  bottom: var(--edge);
+  left: var(--edge);
+  width: 262px;
+}
+.hud__perf {
+  bottom: var(--edge);
+  right: var(--edge);
+  width: 200px;
+}
+
+/* --- brand --- */
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+}
+
+.brand__mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(95, 208, 255, 0.22);
+}
+
+.brand__mark svg {
+  width: 20px;
+  height: 20px;
+}
+
+.brand__name {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.brand__sub {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+/* --- status pill --- */
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px 5px 9px;
+  margin-bottom: 15px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.pill__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.pill--live .pill__dot {
+  animation: atmos-pulse 2.4s ease-in-out infinite;
+}
+
+.pill--loading {
+  background: rgba(154, 171, 196, 0.13);
+  color: var(--text-dim);
+}
+
+.pill--fallback {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+@keyframes atmos-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 rgba(95, 208, 255, 0.45);
+  }
+  50% {
+    opacity: 0.5;
+    box-shadow: 0 0 0 5px rgba(95, 208, 255, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pill--live .pill__dot {
+    animation: none;
+  }
+}
+
+/* --- stats --- */
+
+.stats {
+  display: grid;
+  gap: 11px;
+}
+
+.stats--tight {
+  gap: 9px;
+}
+
+.stat {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.stat__label {
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.stat__value {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text);
+  /* Numbers that change every frame must not reflow the row. */
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.stat__value--accent {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* --- legend --- */
+
+.legend__bar {
+  height: 8px;
+  border-radius: 999px;
+}
+
+.legend__scale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.legend__unit {
+  margin: 6px 0 0;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+/* --- map controls: zoom in / zoom out / reset to north --- */
+
+/* The HUD is pointer-events: none, so anything interactive has to opt back in. */
+.map-controls {
+  position: fixed;
+  top: 50%;
+  right: var(--edge);
+  transform: translateY(-50%);
+  pointer-events: auto;
+  display: grid;
+  gap: 8px;
+}
+
+.map-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
+}
+
+.map-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.map-btn:hover {
+  background: var(--surface-hover);
+  color: var(--accent);
+}
+
+/* Transform is free here, unlike on the old single button, because the
+   translate now lives on the wrapper rather than the button itself. */
+.map-btn:active {
+  transform: scale(0.92);
+}
+
+.map-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* --- notices --- */
+
+.hud__notices {
+  position: fixed;
+  top: calc(var(--edge) + 82px);
+  left: var(--edge);
+  display: grid;
+  gap: 8px;
+  width: 320px;
+}
+
+.notice {
+  margin: 0;
+  padding: 11px 14px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
+.notice strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.notice--warn {
+  background: var(--warn-soft);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+
+.notice--warn strong {
+  color: var(--warn);
+}
+
+/* ------------------------------------------------------------------ *
+ * City search
+ * ------------------------------------------------------------------ */
+
+.hud__search {
+  position: fixed;
+  top: var(--edge);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(380px, calc(100vw - 2 * var(--edge)));
+  pointer-events: auto;
+  z-index: 12;
+}
+
+.search {
+  position: relative;
+}
+
+.search__field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px;
+  height: 46px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  transition: border-color 0.18s ease;
+}
+
+.search__field:focus-within {
+  border-color: rgba(95, 208, 255, 0.5);
+}
+
+.search__icon {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  color: var(--text-dim);
+}
+
+.search__input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13.5px;
+  outline: none;
+}
+
+.search__input::placeholder {
+  color: var(--text-dim);
+}
+
+.search__clear {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  flex: none;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.search__clear svg {
+  width: 12px;
+  height: 12px;
+}
+
+.search__clear:hover {
+  color: var(--text);
+}
+
+.search__spinner {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 2px solid rgba(95, 208, 255, 0.25);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: atmos-spin 0.7s linear infinite;
+}
+
+@keyframes atmos-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .search__spinner {
+    animation-duration: 2s;
+  }
+}
+
+.search__results {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 6px;
+  list-style: none;
+  background: rgba(16, 26, 46, 0.9);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.search__result {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: inherit;
+  font-family: var(--font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.search__result--active {
+  background: var(--surface-hover);
+}
+
+.search__city {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+/* Region + country are always rendered: "Springfield" alone is ambiguous. */
+.search__region {
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.search__empty {
+  padding: 11px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+
+/* ------------------------------------------------------------------ *
+ * Layer filters
+ * ------------------------------------------------------------------ */
+
+.hud__filters {
+  position: fixed;
+  bottom: var(--edge);
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  max-width: calc(100vw - 2 * var(--edge));
+}
+
+.filters {
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+}
+
+.filters__row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  padding: 7px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(22px) saturate(150%);
+  -webkit-backdrop-filter: blur(22px) saturate(150%);
+}
+
+.chip {
+  padding: 7px 15px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-dim);
+  font-family: var(--font);
+  font-size: 12.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.16s ease, color 0.16s ease;
+  white-space: nowrap;
+}
+
+.chip:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.chip--on {
+  background: var(--accent-soft);
+  border-color: rgba(95, 208, 255, 0.3);
+  color: var(--accent);
+}
+
+.chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.filters__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--text-dim);
+  opacity: 0.75;
+}
+
+/* ------------------------------------------------------------------ *
+ * City marker label (rendered inside the canvas via drei <Html>)
+ * ------------------------------------------------------------------ */
+
+.marker {
+  width: 168px;
+  padding: 9px 11px;
+  text-align: center;
+  background: rgba(16, 26, 46, 0.88);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transform: translateY(-50%);
+  pointer-events: none;
+  user-select: none;
+}
+
+.marker__name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.marker__place {
+  margin: 1px 0 0;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
+.marker__badge {
+  display: grid;
+  gap: 1px;
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px solid var(--border);
+}
+
+.marker__temp {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.marker__cond {
+  font-size: 11px;
+  color: var(--text);
+}
+
+.marker__wind {
+  font-size: 10.5px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Says plainly that this is a point reading, not the smoothed grid value. */
+.marker__source {
+  margin-top: 3px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  opacity: 0.75;
+}
+
+/* ------------------------------------------------------------------ *
+ * Small screens: four floating corners would collide, so the layout
+ * collapses to a header and one bottom sheet.
+ * ------------------------------------------------------------------ */
+
+@media (max-width: 760px) {
+  :root {
+    --edge: 12px;
+  }
+
+  /* Telemetry and the full data card are the first things to go — they are
+     supporting detail, not the point of the screen. */
+  .hud__perf,
+  .hud__data,
+  .hud__legend,
+  .map-controls {
+    display: none;
+  }
+
+  .hud__brand {
+    left: var(--edge);
+    right: var(--edge);
+    padding: 10px 14px;
+  }
+
+  .brand__sub {
+    display: none;
+  }
+
+  /* Search sits under the brand bar rather than fighting it for the top strip. */
+  .hud__search {
+    top: calc(var(--edge) + 68px);
+    width: calc(100vw - 2 * var(--edge));
+  }
+
+  .hud__notices {
+    top: auto;
+    bottom: calc(var(--edge) + 96px);
+    left: var(--edge);
+    right: var(--edge);
+    width: auto;
+  }
+
+  .hud__filters {
+    left: var(--edge);
+    right: var(--edge);
+    transform: none;
+    max-width: none;
+  }
+
+  /* Six chips will not fit across a phone; scroll them instead of wrapping
+     into a stack that eats half the viewport. */
+  .filters__row {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    justify-content: flex-start;
+    scrollbar-width: none;
+  }
+
+  .filters__row::-webkit-scrollbar {
+    display: none;
+  }
+}

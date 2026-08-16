@@ -21,12 +21,96 @@ export const GLOBE_RADIUS = 1;
 const EARTH_TEXTURE_URL =
   'https://cdn.jsdelivr.net/npm/three-globe@2.31.0/example/img/earth-blue-marble.jpg';
 
+/* ------------------------------------------------------------------ *
+ * Day/night terminator.
+ *
+ * Injected into the existing MeshStandardMaterial with `onBeforeCompile` rather
+ * than replacing it with a hand-written ShaderMaterial. The Phase 1 globe is
+ * lit, textured and emissive-mapped exactly as it should be, and reimplementing
+ * all of that in raw GLSL to add one dot product would be a rewrite of working
+ * code. The patch is also a strict no-op at `uNight = 0`, which is what lets
+ * Wind mode keep the Phase 1 look pixel for pixel.
+ * ------------------------------------------------------------------ */
+
+/**
+ * The sun direction arrives already transformed into **view** space. The
+ * standard material's `vNormal` is a view-space varying, so meeting it there
+ * costs one CPU-side vector transform per frame instead of an extra varying and
+ * a matrix multiply per fragment.
+ */
+function createTerminatorUniforms() {
+  return {
+    uSunView: { value: new THREE.Vector3(0, 0, 1) },
+    uNight: { value: 0 },
+    uDayLevel: { value: 0.42 },
+    uNightLevel: { value: 0.05 },
+  };
+}
+
+function patchForTerminator(material, uniforms) {
+  material.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, uniforms);
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        /* glsl */ `
+        #include <common>
+        uniform vec3 uSunView;
+        uniform float uNight;
+        uniform float uDayLevel;
+        uniform float uNightLevel;
+        `,
+      )
+      // Injected after <opaque_fragment> and therefore *before* tone mapping and
+      // the sRGB encode, so these multipliers act on linear radiance. Patching
+      // after <dithering_fragment> instead would scale an already-encoded value
+      // and the night side would crush to black well before the intended level.
+      .replace(
+        '#include <opaque_fragment>',
+        /* glsl */ `
+        #include <opaque_fragment>
+        {
+          float sun = dot(normalize(vNormal), normalize(uSunView));
+          // Civil-to-astronomical twilight spans about 18 degrees of solar
+          // elevation. Widening the smoothstep past the geometric horizon is
+          // what makes this a terminator rather than a hard stencil edge.
+          float day = smoothstep(-0.16, 0.20, sun);
+
+          vec3 lit = gl_FragColor.rgb * mix(uNightLevel, uDayLevel, day);
+          // The unlit hemisphere is not neutral grey. Skyglow and moonlight are
+          // strongly blue-shifted, and the cool cast is also what separates the
+          // dark ocean from the green of the aurora sitting on top of it.
+          lit = mix(lit * vec3(0.55, 0.74, 1.30), lit, day);
+
+          gl_FragColor.rgb = mix(gl_FragColor.rgb, lit, uNight);
+        }
+        `,
+      );
+  };
+
+  // Materials are cached by program signature. Without a distinct key, an
+  // unpatched MeshStandardMaterial elsewhere in the scene could be handed this
+  // patched program, or vice versa.
+  material.customProgramCacheKey = () => 'atmos-terminator';
+  material.needsUpdate = true;
+}
+
 /** Shown while the texture loads, and permanently if it fails to. */
-function PlainGlobe({ dim = false }) {
+function PlainGlobe({ dim = false, terminatorUniforms }) {
+  const materialRef = useRef(null);
+
+  useEffect(() => {
+    if (materialRef.current && terminatorUniforms) {
+      patchForTerminator(materialRef.current, terminatorUniforms);
+    }
+  }, [terminatorUniforms]);
+
   return (
     <mesh>
       <sphereGeometry args={[GLOBE_RADIUS, 64, 48]} />
       <meshStandardMaterial
+        ref={materialRef}
         color={dim ? '#1c3661' : '#22406f'}
         roughness={0.95}
         metalness={0}
@@ -35,11 +119,12 @@ function PlainGlobe({ dim = false }) {
   );
 }
 
-function TexturedGlobe() {
+function TexturedGlobe({ terminatorUniforms }) {
   // useLoader suspends. The <Suspense> boundary lives in App.jsx - without one,
   // the canvas goes blank with no error in the console.
   const texture = useLoader(THREE.TextureLoader, EARTH_TEXTURE_URL);
   const { gl } = useThree();
+  const materialRef = useRef(null);
 
   useEffect(() => {
     texture.colorSpace = THREE.SRGBColorSpace;
@@ -47,10 +132,17 @@ function TexturedGlobe() {
     texture.needsUpdate = true;
   }, [texture, gl]);
 
+  useEffect(() => {
+    if (materialRef.current && terminatorUniforms) {
+      patchForTerminator(materialRef.current, terminatorUniforms);
+    }
+  }, [terminatorUniforms]);
+
   return (
     <mesh>
       <sphereGeometry args={[GLOBE_RADIUS, 96, 64]} />
       <meshStandardMaterial
+        ref={materialRef}
         map={texture}
         // A gentle emissive lift keeps the night side of the terminator readable.
         // The wind field covers the whole sphere, so letting half of it fall into
@@ -130,7 +222,11 @@ const atmosphereFragment = /* glsl */ `
   }
 `;
 
-function Atmosphere() {
+/** Daylight scattering strength, and the weaker night-side value it eases to. */
+const ATMOSPHERE_DAY = 1.5;
+const ATMOSPHERE_NIGHT = 0.5;
+
+function Atmosphere({ transitionRef }) {
   const material = useMemo(
     () =>
       new THREE.ShaderMaterial({
@@ -139,7 +235,7 @@ function Atmosphere() {
         uniforms: {
           uColor: { value: new THREE.Color('#6fb4ff') },
           uPower: { value: 2.0 },
-          uStrength: { value: 1.5 },
+          uStrength: { value: ATMOSPHERE_DAY },
         },
         transparent: true,
         side: THREE.BackSide,
@@ -150,6 +246,18 @@ function Atmosphere() {
   );
 
   useEffect(() => () => material.dispose(), [material]);
+
+  // A full-strength daylight halo around an unlit Earth reads as a mistake, and
+  // it sits at exactly the limb where the aurora is brightest, so leaving it up
+  // would also wash the oval out where it matters most.
+  useFrame(() => {
+    const t = transitionRef?.current ?? 0;
+    material.uniforms.uStrength.value = THREE.MathUtils.lerp(
+      ATMOSPHERE_DAY,
+      ATMOSPHERE_NIGHT,
+      t,
+    );
+  });
 
   return (
     <mesh scale={1.12} material={material}>
@@ -180,7 +288,20 @@ export const ZOOM_STEP = 0.78; // multiply distance per press; >1 zooms out
 
 const easeInOutCubic = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
-function Controls({ resetRef, flyToRef, zoomRef }) {
+/**
+ * Where the camera is eased to when Aurora mode opens on an equatorial view.
+ *
+ * 52 degrees sits just equatorward of the oval's usual centre, so the ring is
+ * fully in frame with its poleward edge visible rather than foreshortened over
+ * the horizon. `ALREADY_POLEWARD` is the "leave the user alone" threshold: if
+ * they have already rotated somewhere useful, moving the camera under them is
+ * worse than doing nothing.
+ */
+const AURORA_VIEW_LAT = 52;
+const ALREADY_POLEWARD = 34;
+const POLEWARD_DURATION = 1.6; // seconds, matched to the mode crossfade
+
+function Controls({ resetRef, flyToRef, zoomRef, poleRef }) {
   const [idle, setIdle] = useState(true);
   const timer = useRef(null);
   const controlsRef = useRef(null);
@@ -218,7 +339,7 @@ function Controls({ resetRef, flyToRef, zoomRef }) {
       const from = controls.getPolarAngle();
       // Already level: nothing to animate.
       if (Math.abs(from - Math.PI / 2) < 0.001) return;
-      anim.current = { kind: 'reset', fromPhi: from, t: 0 };
+      anim.current = { kind: 'polar', fromPhi: from, toPhi: Math.PI / 2, t: 0, duration: RESET_DURATION };
       clearTimeout(timer.current);
       setIdle(false);
     };
@@ -226,6 +347,41 @@ function Controls({ resetRef, flyToRef, zoomRef }) {
       resetRef.current = null;
     };
   }, [resetRef]);
+
+  /**
+   * Ease toward a high-latitude view so Aurora mode opens on the oval instead of
+   * on an empty equator with the whole phenomenon off-screen behind the horizon.
+   *
+   * Reuses the polar-only path the compass reset already uses: azimuth and zoom
+   * are untouched, so whatever longitude the user was looking at stays centred
+   * and only the tilt changes. A no-op when they are already looking poleward,
+   * and `hemisphere` follows the data rather than always assuming north.
+   */
+  useEffect(() => {
+    if (!poleRef) return undefined;
+    poleRef.current = (hemisphere) => {
+      const controls = controlsRef.current;
+      if (!controls) return;
+
+      const fromPhi = controls.getPolarAngle();
+      const currentLat = 90 - (fromPhi * 180) / Math.PI;
+      if (Math.abs(currentLat) >= ALREADY_POLEWARD) return;
+
+      const targetLat = hemisphere === 'south' ? -AURORA_VIEW_LAT : AURORA_VIEW_LAT;
+      anim.current = {
+        kind: 'polar',
+        fromPhi,
+        toPhi: ((90 - targetLat) * Math.PI) / 180,
+        t: 0,
+        duration: POLEWARD_DURATION,
+      };
+      clearTimeout(timer.current);
+      setIdle(false);
+    };
+    return () => {
+      poleRef.current = null;
+    };
+  }, [poleRef]);
 
   /**
    * Fly to a lat/lon. Auto-rotate is switched off for the duration and only
@@ -289,9 +445,9 @@ function Controls({ resetRef, flyToRef, zoomRef }) {
     const controls = controlsRef.current;
     if (!current || !controls) return;
 
-    if (current.kind === 'reset') {
-      current.t = Math.min(1, current.t + delta / RESET_DURATION);
-      const phi = THREE.MathUtils.lerp(current.fromPhi, Math.PI / 2, easeInOutCubic(current.t));
+    if (current.kind === 'polar') {
+      current.t = Math.min(1, current.t + delta / current.duration);
+      const phi = THREE.MathUtils.lerp(current.fromPhi, current.toPhi, easeInOutCubic(current.t));
 
       // Rewrite only the polar component of the camera's position around the
       // orbit target; radius and azimuth are carried through untouched.
@@ -352,7 +508,40 @@ function Controls({ resetRef, flyToRef, zoomRef }) {
   );
 }
 
-export default function Globe({ onTextureError, resetRef, flyToRef, zoomRef }) {
+export default function Globe({
+  onTextureError,
+  resetRef,
+  flyToRef,
+  zoomRef,
+  poleRef,
+  transitionRef,
+  sunDirection,
+}) {
+  const { camera } = useThree();
+  const terminatorUniforms = useMemo(createTerminatorUniforms, []);
+
+  // World-space subsolar direction, updated once a minute by useSunPosition.
+  const sunWorld = useMemo(() => new THREE.Vector3(0, 0, 1), []);
+  useEffect(() => {
+    if (sunDirection) sunWorld.set(sunDirection[0], sunDirection[1], sunDirection[2]);
+  }, [sunDirection, sunWorld]);
+
+  /**
+   * One writer for both terminator uniforms, so the textured globe and its
+   * fallback can never disagree about where the sun is.
+   *
+   * The direction is re-transformed every frame because it is held in view
+   * space, and the view changes whenever the camera orbits - a value computed
+   * once on the minute would leave the terminator glued to the screen instead of
+   * to the planet.
+   */
+  useFrame(() => {
+    terminatorUniforms.uSunView.value
+      .copy(sunWorld)
+      .transformDirection(camera.matrixWorldInverse);
+    terminatorUniforms.uNight.value = transitionRef?.current ?? 0;
+  });
+
   return (
     <>
       {/* Mostly flat lighting with one soft key. A hard terminator would look
@@ -361,12 +550,20 @@ export default function Globe({ onTextureError, resetRef, flyToRef, zoomRef }) {
       <directionalLight position={[3, 1.5, 4]} intensity={0.8} color="#ffffff" />
       <directionalLight position={[-4, -1, -3]} intensity={0.5} color="#93b4ff" />
 
-      <TextureBoundary fallback={<PlainGlobe dim />} onError={onTextureError}>
-        <TexturedGlobe />
+      <TextureBoundary
+        fallback={<PlainGlobe dim terminatorUniforms={terminatorUniforms} />}
+        onError={onTextureError}
+      >
+        <TexturedGlobe terminatorUniforms={terminatorUniforms} />
       </TextureBoundary>
 
-      <Atmosphere />
-      <Controls resetRef={resetRef} flyToRef={flyToRef} zoomRef={zoomRef} />
+      <Atmosphere transitionRef={transitionRef} />
+      <Controls
+        resetRef={resetRef}
+        flyToRef={flyToRef}
+        zoomRef={zoomRef}
+        poleRef={poleRef}
+      />
     </>
   );
 }

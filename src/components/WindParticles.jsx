@@ -77,7 +77,15 @@ function randomLat() {
   return Math.asin(Math.random() * 2 - 1) * (180 / Math.PI);
 }
 
-export default function WindParticles({ field, count }) {
+/**
+ * Below this the streaks are invisible, so the simulation stops entirely rather
+ * than advancing a field nobody can see. App.jsx unmounts the component shortly
+ * afterwards; this covers the crossfade's tail, where the layer is still mounted
+ * because it is mid-fade but is no longer contributing any pixels.
+ */
+const INVISIBLE = 0.004;
+
+export default function WindParticles({ field, count, transitionRef }) {
   const pointsRef = useRef(null);
   const { gl } = useThree();
 
@@ -160,6 +168,13 @@ export default function WindParticles({ field, count }) {
     const points = pointsRef.current;
     const currentField = fieldRef.current;
     if (!points || !currentField) return;
+
+    // 1 in Wind mode, 0 in Aurora mode, ramping across the crossfade. Read from
+    // a ref rather than a prop so the fade costs no React renders.
+    const fade = 1 - (transitionRef?.current ?? 0);
+    // A genuine pause, not a hidden layer: advection, respawn sampling and the
+    // four buffer uploads are all skipped, not merely rendered at zero alpha.
+    if (fade <= INVISIBLE) return;
 
     const dt = Math.min(rawDelta, MAX_DELTA);
     const { positions, colors, alphas, sizes, baseSize, lat, lon, age, life, tailRamp } = buffers;
@@ -247,7 +262,7 @@ export default function WindParticles({ field, count }) {
       if (absLat > FADE_LAT) {
         alpha *= Math.max(0, 1 - (absLat - FADE_LAT) / (RETIRE_LAT - FADE_LAT));
       }
-      alpha *= 0.92;
+      alpha *= 0.92 * fade;
 
       speedColor(speed, rgb);
       latLonToVec3(lat[i], lon[i], PARTICLE_RADIUS, vec);

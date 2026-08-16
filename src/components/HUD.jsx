@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { SPEED_STOPS, MS_TO_KMH } from '../utils/windField';
+import { FULL_SCALE } from '../utils/auroraGrid';
 import SearchBar from './SearchBar';
 import FilterPanel from './FilterPanel';
 
 const STATUS_LABEL = {
+  idle: 'Standby',
   loading: 'Connecting',
   live: 'Live',
   fallback: 'Offline data',
@@ -17,12 +19,33 @@ function formatClock(ms) {
 function formatObserved(iso) {
   if (!iso) return '-';
   const [date, time] = iso.split('T');
-  return `${date} · ${time} UTC`;
+  // NOAA stamps a trailing Z that Open-Meteo omits; strip it so the two sources
+  // render identically rather than one reading "05:50:00Z UTC".
+  return `${date} · ${time.replace('Z', '').slice(0, 5)} UTC`;
+}
+
+/** Subsolar point, as a plain compass-signed lat/lon pair. */
+function formatLatLon({ lat, lon } = {}) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return '-';
+  const ns = lat >= 0 ? 'N' : 'S';
+  const ew = lon >= 0 ? 'E' : 'W';
+  return `${Math.abs(lat).toFixed(1)}°${ns} ${Math.abs(lon).toFixed(1)}°${ew}`;
 }
 
 const legendGradient = `linear-gradient(90deg, ${SPEED_STOPS.map(
   (stop, i) => `${stop.hex} ${(i / (SPEED_STOPS.length - 1)) * 100}%`,
 ).join(', ')})`;
+
+/**
+ * Mirrors the ramp in `auroraColor`, so the legend cannot drift away from what
+ * is actually drawn on the globe.
+ */
+const auroraGradient =
+  'linear-gradient(90deg, rgba(20,150,170,0) 0%, rgb(20,150,170) 18%, ' +
+  'rgb(46,228,190) 55%, rgb(210,255,245) 100%)';
+
+/** Ticks across the aurora legend, in percentage points of visibility chance. */
+const AURORA_TICKS = [0, FULL_SCALE / 3, (FULL_SCALE * 2) / 3, FULL_SCALE];
 
 /**
  * Frame stats live in a mutable ref written by the render loop. The HUD polls it
@@ -69,8 +92,12 @@ export default function HUD({
   onClearPlace,
   selectedPlace,
   cityWeather,
+  mode,
+  aurora,
+  sun,
 }) {
   const { fps } = useFrameStats(statsRef);
+  const isAurora = mode === 'aurora';
 
   return (
     <div className="hud">
@@ -85,28 +112,58 @@ export default function HUD({
           </span>
           <div>
             <h1 className="brand__name">Project Atmos</h1>
-            <p className="brand__sub">Global surface wind · 10 m above ground</p>
+            <p className="brand__sub">
+              {isAurora
+                ? 'Auroral oval · NOAA OVATION nowcast'
+                : 'Global surface wind · 10 m above ground'}
+            </p>
           </div>
         </div>
       </header>
 
-      <section className="card hud__data">
-        <div className={`pill pill--${status}`}>
-          <span className="pill__dot" aria-hidden="true" />
-          {STATUS_LABEL[status]}
-        </div>
-        <div className="stats">
-          <Stat label="Observed" value={formatObserved(observedAt)} />
-          <Stat label="Retrieved" value={formatClock(updatedAt)} />
-          <Stat label="Coverage" value={`${filled || 0} of ${gridPoints} points`} />
-          <Stat label="Refreshes every" value={`${Math.round(refetchMs / 60000)} minutes`} />
-        </div>
-      </section>
+      {/* Both modes read from different endpoints on different cadences, so the
+          data panel reports whichever one is actually driving the globe rather
+          than showing stale wind figures under an aurora. */}
+      {isAurora ? (
+        <section className="card hud__data">
+          <div className={`pill pill--${aurora.status}`}>
+            <span className="pill__dot" aria-hidden="true" />
+            {STATUS_LABEL[aurora.status]}
+          </div>
+          <div className="stats">
+            <Stat label="Observed" value={formatObserved(aurora.observedAt)} />
+            {/* "Forecast for" wraps this 268px card onto a second line; the
+                stamp is the same width as the Observed row above it. */}
+            <Stat label="Forecast" value={formatObserved(aurora.forecastAt)} />
+            <Stat label="Peak chance" value={`${Math.round(aurora.peak || 0)}%`} />
+            <Stat label="Subsolar point" value={formatLatLon(sun)} />
+            <Stat
+              label="Refreshes every"
+              value={`${Math.round(aurora.refetchMs / 60000)} minutes`}
+            />
+          </div>
+        </section>
+      ) : (
+        <section className="card hud__data">
+          <div className={`pill pill--${status}`}>
+            <span className="pill__dot" aria-hidden="true" />
+            {STATUS_LABEL[status]}
+          </div>
+          <div className="stats">
+            <Stat label="Observed" value={formatObserved(observedAt)} />
+            <Stat label="Retrieved" value={formatClock(updatedAt)} />
+            <Stat label="Coverage" value={`${filled || 0} of ${gridPoints} points`} />
+            <Stat label="Refreshes every" value={`${Math.round(refetchMs / 60000)} minutes`} />
+          </div>
+        </section>
+      )}
 
       <div className="hud__search">
         <SearchBar onSelect={onSelectPlace} onClear={onClearPlace} selected={selectedPlace} />
       </div>
 
+      {/* Stays up in Aurora mode: the Aurora chip lives in this row, so hiding it
+          would remove the only way back out. */}
       <div className="hud__filters">
         <FilterPanel active={activeLayers} onToggle={onToggleLayer} maxActive={maxActiveLayers} />
       </div>
@@ -153,33 +210,68 @@ export default function HUD({
         </button>
       </div>
 
-      <section className="card hud__legend">
-        <p className="card__title">Wind speed</p>
-        <div className="legend__bar" style={{ background: legendGradient }} />
-        <div className="legend__scale">
-          {SPEED_STOPS.map((stop) => (
-            <span key={stop.speed}>{Math.round(stop.speed * MS_TO_KMH)}</span>
-          ))}
-        </div>
-        <p className="legend__unit">kilometres per hour</p>
-      </section>
+      {isAurora ? (
+        <section className="card hud__legend">
+          <p className="card__title">Aurora visibility</p>
+          <div className="legend__bar" style={{ background: auroraGradient }} />
+          <div className="legend__scale">
+            {AURORA_TICKS.map((tick) => (
+              <span key={tick}>{Math.round(tick)}</span>
+            ))}
+          </div>
+          {/* The gain is stated rather than hidden: the scale tops out well below
+              100% because an ordinary night never reaches it, and a legend that
+              claimed otherwise would imply the display was broken. */}
+          <p className="legend__unit">% chance of visible aurora</p>
+        </section>
+      ) : (
+        <section className="card hud__legend">
+          <p className="card__title">Wind speed</p>
+          <div className="legend__bar" style={{ background: legendGradient }} />
+          <div className="legend__scale">
+            {SPEED_STOPS.map((stop) => (
+              <span key={stop.speed}>{Math.round(stop.speed * MS_TO_KMH)}</span>
+            ))}
+          </div>
+          <p className="legend__unit">kilometres per hour</p>
+        </section>
+      )}
 
       <section className="card hud__perf">
         <div className="stats stats--tight">
-          <Stat label="Streaks" value={particleCount.toLocaleString()} accent />
+          <Stat
+            label={isAurora ? 'Grid' : 'Streaks'}
+            value={
+              isAurora
+                ? `${quality.tier === 'high' ? '360 × 181' : '180 × 91'}`
+                : particleCount.toLocaleString()
+            }
+            accent
+          />
           <Stat label="Frame rate" value={fps ? `${fps} fps` : '-'} accent />
           <Stat label="Quality" value={quality.tier === 'high' ? 'Full' : 'Reduced'} accent />
         </div>
       </section>
 
       <div className="hud__notices">
-        {status === 'fallback' && (
+        {isAurora && aurora.status === 'fallback' && (
+          <p className="notice notice--warn">
+            <strong>Live aurora unavailable.</strong> Showing a modelled oval around each
+            geomagnetic pole.{aurora.error ? ` ${aurora.error}` : ''}
+          </p>
+        )}
+        {isAurora && aurora.status === 'live' && aurora.error && (
+          <p className="notice notice--warn">
+            <strong>Refresh failed.</strong> Showing the last good nowcast. {aurora.error}
+          </p>
+        )}
+        {!isAurora && status === 'fallback' && (
           <p className="notice notice--warn">
             <strong>Live wind unavailable.</strong> Showing a synthetic climatological field.
             {error ? ` ${error}` : ''}
           </p>
         )}
-        {status === 'live' && error && (
+        {!isAurora && status === 'live' && error && (
           <p className="notice notice--warn">
             <strong>Refresh failed.</strong> Showing the last good reading. {error}
           </p>

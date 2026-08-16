@@ -19,6 +19,10 @@
 
   --accent: #5fd0ff;
   --accent-soft: rgba(95, 208, 255, 0.14);
+  /* Matches the mid stop of the aurora ramp in auroraGrid.js, so the chip and
+     the legend read as the same colour as the oval on the globe. */
+  --aurora: #2ee4be;
+  --aurora-soft: rgba(46, 228, 190, 0.15);
   --warn: #fbbf24;
   --warn-soft: rgba(251, 191, 36, 0.13);
 
@@ -581,9 +585,35 @@ body {
   color: var(--accent);
 }
 
+/* Aurora is the one chip that replaces the scene rather than adding to it, so
+   it carries the colour it paints on the globe instead of the shared accent.
+   The separator marks it as belonging to a different group without needing a
+   second row or a label. */
+.chip--aurora {
+  margin-left: 4px;
+  border-left: 1px solid var(--border);
+  border-radius: 0 999px 999px 0;
+  padding-left: 18px;
+}
+
+.chip--aurora:hover {
+  color: var(--aurora);
+}
+
+.chip--aurora.chip--on {
+  background: var(--aurora-soft);
+  border-color: rgba(46, 228, 190, 0.32);
+  border-left-color: rgba(46, 228, 190, 0.32);
+  color: var(--aurora);
+}
+
 .chip:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+.chip--aurora:focus-visible {
+  outline-color: var(--aurora);
 }
 
 .filters__hint {

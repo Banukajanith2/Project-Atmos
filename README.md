@@ -1,176 +1,195 @@
 # Project Atmos
 
-A real-time 3D Earth showing live global surface wind as animated particle
-streaks. No API key, no backend, no paid services - the build output is static
-files.
+A real-time 3D Earth showing live global weather on a WebGL globe: animated wind
+streaks, six weather layers, and a live NOAA auroral oval. No API key, no
+backend, no paid services - the build output is static files.
 
-Visual reference: [earth.nullschool.net](https://earth.nullschool.net),
-simplified.
-
----
+Live: <https://banukajanith2.github.io/Project-Atmos/>
+Visual reference: [earth.nullschool.net](https://earth.nullschool.net), simplified.
 
 ## Setup
 
 ```bash
 npm install
-npm run dev      # http://localhost:5173
+npm run dev        # http://localhost:5173
+npm run build:only # -> dist/, static files only
+npm run build      # build AND deploy to the gh branch
+npm run preview    # serve the production build locally
 ```
 
-```bash
-npm run build    # -> dist/, static files only
-npm run preview  # serve the production build locally
-```
-
-Deploys as-is to any static host (Vercel, Netlify, GitHub Pages, Cloudflare
-Pages). No server runtime, no environment variables, nothing to configure.
+Deploys as-is to any static host. No server runtime, no environment variables.
+`base: './'` in `vite.config.js` is required - this is a project site served from
+a subpath, so the default absolute base 404s every asset.
 
 ## Stack
 
-| Piece | Choice | Why |
+Vite + React (no routing, SSR or backend to justify Next.js),
+`@react-three/fiber` + `@react-three/drei` for the scene, plain `fetch` for data.
+
+## Data sources
+
+All free, no key, no signup.
+
+| Source | Used for | Cadence |
 |---|---|---|
-| Bundler | Vite + React | No routing, SSR, or backend to justify Next.js |
-| 3D | `@react-three/fiber` + `@react-three/drei` | React renderer for Three.js; drei supplies `OrbitControls` |
-| Data | plain `fetch` | One endpoint - a data-fetching library would be dead weight |
+| [Open-Meteo](https://open-meteo.com) forecast | Wind + all six weather layers | 30 min |
+| Open-Meteo geocoding | City search | debounced, cached |
+| [NOAA SWPC OVATION](https://services.swpc.noaa.gov/json/ovation_aurora_latest.json) | Auroral oval | 5 min, lazy |
 
-## Data source
+Open-Meteo is **per-point** - there is no whole-world grid endpoint - so the grid
+is built here and requested in one batched call: 10° spacing, lat -80…80,
+lon -180…170 → **612 points**, under the 1,000-per-request cap. Every weather
+layer reads from that same request, so the extra layers cost zero API budget.
+Responses carry a zero-based `location_id`; the hook keys off it rather than
+trusting array position.
 
-[Open-Meteo](https://open-meteo.com) forecast API - free, no key, no signup
-(10,000 calls/day, non-commercial).
-
-The API is **per-point**; there is no "whole world" wind grid endpoint. The
-global grid is therefore built here and requested in a single batched call:
-
-- 10° spacing, latitude -80…80, longitude -180…170 → **612 points**, under
-  Open-Meteo's 1,000-locations-per-request cap.
-- `current=wind_speed_10m,wind_direction_10m`
-- One request on mount, then a refetch every 30 minutes. Never per frame.
-
-The response is an array in request order, and each entry after the first
-carries a zero-based `location_id`; the hook keys off that id where present
-rather than trusting array position alone.
+OVATION is 924 KB of flat `[lon, lat, probability]` triples: 65,160 points,
+**longitude-major**, lon 0-359 unsigned, lat -90 to 90 inclusive. Verified to send
+`access-control-allow-origin: *`. Fetched lazily - a user who never opens Aurora
+never pays for it.
 
 ## Architecture
 
 ```
 src/
-  main.jsx                  React root (StrictMode)
-  App.jsx                   Canvas, Suspense boundary, adaptive quality
-  styles.css                design tokens + HUD layout
+  App.jsx                   Canvas, Suspense boundary, adaptive quality, mode crossfade
   components/
-    Globe.jsx               sphere, texture, atmosphere, error boundary, controls
+    Globe.jsx               sphere, texture, atmosphere, terminator, error boundary, controls
     WindParticles.jsx       the wind system (single Points object)
     RainLayer.jsx           falling streaks + the reusable PrecipStreaks core
     ThunderLayer.jsx        PrecipStreaks + independently-timed flashes
     SnowLayer.jsx           slow drifting points
     CloudLayer.jsx          cloud shell + the shared grid-texture builder
     SunnyGlow.jsx           clear-sky wash
+    AuroraLayer.jsx         auroral oval as an additive canvas-texture shell
     CityMarker.jsx          reticle, label, current-conditions badge
     SearchBar.jsx           debounced search + disambiguation list
-    FilterPanel.jsx         layer toggles
+    FilterPanel.jsx         layer toggles, including the exclusive Aurora chip
     HUD.jsx                 plain DOM overlay - deliberately not inside <Canvas>
   hooks/
     useWindData.js          grid fetch + cache + interval refetch + fallback
+    useAuroraData.js        OVATION fetch + cache + 5-minute refetch + fallback
+    useSunPosition.js       subsolar point from UTC, for the terminator
     useCitySearch.js        debounced geocoding
     useCityWeather.js       single-point precise fetch
   utils/
     windField.js            grid, vector math, bilinear interpolation, colour ramp
+    auroraGrid.js           probability grid -> blurred canvas texture
     weatherCodes.js         WMO code -> condition buckets
     cameraFlight.js         great-circle camera interpolation
 ```
 
-**One rule holds the whole thing together:** per-frame state never touches
-React. Particle positions live in typed arrays mutated inside `useFrame`;
-React renders the scene graph once and then gets out of the way.
+**One rule holds the whole thing together:** per-frame state never touches React.
+Particle positions live in typed arrays mutated inside `useFrame`; React renders
+the scene graph once and gets out of the way. The mode crossfade follows the same
+rule - it runs through a ref, so a 1.4 s animation causes zero renders.
 
-### The wind field
+## How it works
 
-`wind_direction_10m` is *meteorological* - the bearing the wind is coming
-**from**. The motion vector is the reverse:
+**Wind field.** `wind_direction_10m` is *meteorological* - the bearing wind comes
+**from** - so the motion vector is `u = -speed·sin(dir)`, `v = -speed·cos(dir)`.
+Sampling is bilinear on the `u`/`v` components, not on speed and bearing:
+averaging angles across the 359°→1° seam swings a particle the long way round the
+compass. Longitude is circular; latitude clamps, as no row exists past ±80°.
 
-```
-u (eastward)  = -speed · sin(direction)
-v (northward) = -speed · cos(direction)
-```
+**Streaks.** Each particle is a short trail - one live head plus a ring buffer of
+frozen past positions - all sharing one `BufferGeometry` and one `Points` object,
+so it stays a single draw call. Trail samples are laid down every 110 ms; at
+60 fps a per-frame sample would be sub-pixel and collapse into a blob.
 
-Sampling is **bilinear** across the four surrounding grid points. The `u`/`v`
-components are interpolated rather than speed and bearing - averaging *angles*
-across the 359°→1° seam would swing a particle the long way round the compass.
+**Adaptive quality.** Capability probe on mount (`deviceMemory`,
+`hardwareConcurrency`, `prefers-reduced-motion`), then a live frame-time probe
+that downgrades once below 38 fps. The runtime probe matters because
+`deviceMemory` is Chromium-only, so a missing value must mean *unknown*, not
+*fast*. Capability detection, never brand detection.
 
-Longitude is treated as **circular**: the neighbour of the 170° column is the
--180° column, so there is no seam at the antimeridian. Latitude neighbours
-clamp instead, because no row exists past ±80°.
+| Tier | Streaks | DPR cap | Antialiasing | Aurora grid |
+|---|---|---|---|---|
+| full | 2,800 | 2 | on | 360×181 |
+| reduced | 700 | 1.5 | off | 180×91 |
 
-### Particle streaks
+**Zoom limits come from the texture, not from feel.** The basemap is 4096 px
+around 360° (~652 px per world unit at the equator). `minDistance` is **1.75**,
+capping magnification at ~2.5×, which linear filtering plus anisotropy carry
+without visible texels.
 
-Each particle is drawn as a short trail of points - one live head plus a
-ring buffer of frozen past positions - which is what turns a field of dots into
-directional streaks. All particles' slots share **one** `BufferGeometry` and
-**one** `THREE.Points` object, so it stays a single draw call.
+## Aurora
 
-Trail samples are laid down every 110 ms rather than every frame; at 60 fps a
-per-frame sample would be sub-pixel and the streak would collapse into a blob.
-Because the cadence is measured in simulated seconds, streak length is the same
-whether the device runs at 60 fps or 15.
+The seventh chip in the filter row, and the one **exclusive** entry: selecting it
+clears the others and deselecting restores them. The rest are washes over a
+daylit Earth and combine happily, but Aurora rebuilds the scene around a dark
+one, so pairing them would mean lighting and unlighting the globe at once.
 
-`TIME_ACCEL` in `WindParticles.jsx` is a pure playback speed-up. Real surface
-wind moves about 0.0001°/s, which is invisible; the constant only affects
-animation, never the speeds reported in the HUD.
+Mode is **derived** from `activeLayers.includes('aurora')`, never stored beside
+it - two pieces of state describing one thing eventually disagree.
 
-### Adaptive quality
+**Why a texture, not points.** 65,160 is the wrong count for a `Points` object
+and the right count for a raster: a dense regular grid describing a soft glow. It
+is rasterised to a canvas and applied as a `CanvasTexture` on an additive shell
+just clear of the surface - one draw call, GPU interpolation for free. Two cheap
+separable blur passes run first, because at 1° resolution a cell covers ~3 screen
+pixels and bilinear filtering alone turns blocks into diamonds. The shell
+brightens at grazing angles, which is why real aurora glows hardest at the limb.
 
-Capability probe on mount - `navigator.deviceMemory`, `hardwareConcurrency`,
-and `prefers-reduced-motion` - followed by a live frame-time probe that
-downgrades once if the device sustains under 38 fps.
+**Display gain.** The ramp saturates at **45%**, not 100%. An ordinary night
+peaks at 20-40 and a strong storm rarely passes 70, so normalising against the
+nominal maximum would render most nights as a smudge. The legend states the scale
+and the HUD reports the true observed peak, so the gain is visible, not hidden.
+Values below 3% are dropped - the model emits a low haze over most of the globe
+that accumulates under additive blending into a dirty film.
 
-The runtime probe matters because `deviceMemory` is Chromium-only: iOS Safari
-reports nothing, so a missing value has to mean *unknown*, not *fast*. This is
-**capability detection, never brand detection** - an old iPhone under Safari's
-memory-pressure eviction chokes on a scene a new one handles fine, and the user
-agent cannot tell you which one you have.
+**Terminator.** The subsolar point uses the Astronomical Almanac's low-accuracy
+formula including the equation of centre (dropping it costs up to 4° of
+longitude). It is injected into the **existing** `MeshStandardMaterial` via
+`onBeforeCompile` rather than replacing it - the Phase 1 globe is already lit,
+textured and emissive-mapped correctly. The patch is a strict no-op at
+`uNight = 0`, so **Wind mode keeps the Phase 1 look exactly**: flat bright
+lighting, no terminator, the full wind field readable everywhere.
 
-| Tier | Streaks | DPR cap | Antialiasing |
-|---|---|---|---|
-| full | 2,800 | 2 | on |
-| reduced | 700 | 1.5 | off |
+## Weather layers
 
-Degradation is stated, not silent: the HUD shows a "reduced quality mode"
-notice with the reason that triggered it.
+All six read from the same batched 612-point request.
 
-## Known bugs, pre-empted
+| Layer | Rendering | Why it is not a recolour |
+|---|---|---|
+| Wind | Point trails along the interpolated vector field | - |
+| Rain | `LineSegments` anchored to the radial | A line has an axis; anchoring it to "down" reads as falling from any angle |
+| Thunderstorm | Rain's motion, plus flash sprites | Each cell owns its countdown, so storms never strobe in unison |
+| Snow | Round points, ⅓ the fall speed, lateral wander | Recolouring rain white just produces white rain |
+| Clear | Cool additive wash over clear cells | "Clear" is a reported state; drawing nothing would look like missing data |
+| Clouds | Translucent shell, opacity from `cloud_cover` | Coverage is a state, not a particle phenomenon |
 
-Each of these is fixed in the code as shipped. The table is here so the
-reasoning is not lost the next time someone "simplifies" one of them.
+Capped at **3 at once** (1 in reduced quality); going past the cap drops the
+*oldest* selection rather than rejecting the tap, because a button that visibly
+does nothing reads as broken. Layers are **unmounted** when off, not hidden -
+unmounting is the pause.
 
-| Issue | Fix |
-|---|---|
-| Blank canvas, no error | `useLoader` suspends - missing `<Suspense>` blanks the canvas silently. Boundary lives in `App.jsx`. |
-| Texture CORS / 404 failure | CDN URL verified to return `200` + `access-control-allow-origin: *` before wiring it in. Note the three.js `examples/textures/planets/...` paths on unpkg and jsdelivr now **404** - they are not published inside the npm package. |
-| Texture fails anyway | A thrown loader error does not land in a Suspense fallback. `Globe.jsx` has a real error boundary that swaps in a flat dark material, and the HUD says so. |
-| Particle animation janky | `BufferAttribute` arrays mutated in `useFrame` with `needsUpdate = true`. Per-frame positions in `useState` would re-render React at 60 Hz. |
-| Duplicate fetch in dev console | Expected StrictMode double-invoke, not a bug. Guarded by an `AbortController` plus an in-flight ref so it does not double-hit the API. |
-| Blocky / robotic motion | Bilinear interpolation, never nearest-neighbour. |
-| Breakage at the poles | Hard exclusion at ±80° with an opacity fade from ±66°, so the cutoff is a soft horizon rather than a ring of vanishing particles. |
-| Breakage at the antimeridian | Circular longitude interpolation. Folding ±180° is continuous in 3D, so trails do not smear across the globe at the seam. |
-| Open-Meteo unreachable | `try`/`catch` with a synthetic banded-zonal-flow fallback field, so the globe is never empty. Error surfaced in the HUD. |
-| Rate limit returns **200** | A rate-limited reply is `{error: true, reason: "..."}` and can arrive with a 200 status, so `response.ok` alone is not enough - the body shape is validated too. |
-| A refresh fails after a good fetch | Last good field is kept and the HUD flags the stale refresh, rather than throwing away live data for synthetic. |
-| iOS Safari killed under memory pressure | Capability probe + live frame-time probe. Never a brand check. |
-| Canvas jumps on resize | `<Canvas>` owns resize. Nothing else calls `setSize`/`setPixelRatio` - a second writer fights it. |
-| Hammering the API | One batched request on mount + 30-minute interval, cleaned up on unmount. Never inside `useFrame`. |
-| Camera clipping through the globe | `minDistance`/`maxDistance` clamped on `OrbitControls`. |
-| Camera flies through the globe, or the long way round, on antimeridian-crossing searches | Quaternion slerp of the camera *direction*, never a lat/lon or xyz lerp. Lerping lat/lon sends 175°E → 175°W the 350° way; lerping xyz cuts a chord through the planet's interior. |
-| Exactly antipodal flight produces NaN | `setFromUnitVectors` picks an arbitrary perpendicular axis for the 180° case; covered by a test. |
-| Zoomed-in city view looks pixelated | `minDistance` derived from the basemap's real texel density (see above), not chosen by feel. |
-| Ambiguous city names resolve to the wrong place silently | Region and country always shown; selection is always explicit. |
-| Geocoding request on every keystroke | 300 ms debounce plus a query cache in `useCitySearch.js`. Verified: 11 keystrokes → 1 request. |
-| Geocoding "no match" crashes the dropdown | A query with no results answers **200 with the `results` key absent entirely** - not an empty array - so the shape is validated rather than assumed. |
-| Out-of-order search responses overwrite newer ones | Each lookup carries a request id; a stale response is discarded. |
-| City badge disagrees with the ambient grid at that point | Expected - different fidelities. Labelled "current conditions" rather than reconciled. |
-| Misclassified conditions (drizzle shown as thunder) | Explicit WMO code sets, not range guesses. Covered by per-code tests. |
-| All layers on at once becomes visual noise | Capped at 3 (1 in reduced quality); the oldest selection is evicted rather than the tap ignored. |
-| Frame drops from layers that are toggled off | Layers are unmounted, not hidden, so their `useFrame` stops entirely. |
-| Auto-rotate fighting the search camera flight | Auto-rotate is disabled for the duration of any camera animation and re-armed only by the normal idle timer. |
-| Weather layers misaligned half a cell from their data | Grid textures correct for the half-texel offset (grid point 0 is the *centre* of texel 0) and rescale sphere V from ±90° to the grid's ±80°. |
+The sunny glow is deliberately cool (`#cfeaff`) rather than the warm rim-light
+the brief specified: a gold accent would fight the blue basemap and cyan wind
+ramp. `utils/weatherCodes.js` maps WMO codes as explicit sets, not ranges - the
+numbering is not contiguous by condition.
+
+## City search
+
+Debounced 300 ms with a query cache, so typing "Springfield" costs one request,
+not eleven. Results **always** show region and country, and there is deliberately
+no path that jumps to the top hit - "Springfield" matches a dozen real places,
+and silently flying to the most populous one is a wrong answer delivered
+confidently.
+
+Selecting a result fires a separate single-point request. This is intentionally
+not reconciled with the ambient grid: at 10° spacing (~1,100 km) the interpolated
+value at a city is a smoothed regional field, not that city's weather. The badge
+is labelled "current conditions" to say which is being read. The marker is a
+locator reticle, not a city boundary.
+
+## Controls
+
+Drag to rotate, scroll or **+ / -** to zoom; auto-rotate resumes after 3.5 s
+idle. Zoom steps are multiplicative, so each press covers the same proportion of
+the remaining distance. The compass button levels the tilt so the pole points up
+the screen without teleporting you elsewhere. All camera animations share **one**
+slot, so starting any cancels the others rather than two fighting for the camera.
 
 ## Design
 
@@ -180,134 +199,60 @@ reasoning is not lost the next time someone "simplifies" one of them.
 | Surface (glass) | `rgba(255,255,255,.055)` |
 | Border | `rgba(255,255,255,.10)` |
 | Text / secondary | `#f1f5f9` / `#9aabc4` |
-| Accent (wind) | `#5fd0ff` |
+| Accent (wind) / Aurora | `#5fd0ff` / `#2ee4be` |
 | Warning | `#fbbf24` |
 
-Deliberately **not** a pure-black backdrop. Flat `#000` flattens the globe and
-turns every panel edge into a hairline diagram; the background is a layered blue
-gradient instead, and the panels are translucent glass that picks it up.
+Deliberately **not** pure black - flat `#000` flattens the globe and turns every
+panel edge into a hairline diagram. Glass is applied selectively, to the floating
+panels only, which keeps it reading as current rather than 2020. Numbers use
+`tabular-nums` so values that change every frame do not reflow their row. The HUD
+is plain DOM with `pointer-events: none`; only controls opt back in.
 
-Glass is applied **selectively** - to the floating panels only, never the whole
-page - which is what keeps it reading as current rather than 2020. Corners are
-18 px, type is plain Inter at readable sizes rather than letterspaced caps and
-monospace telemetry, and numbers use `tabular-nums` so values that change every
-frame do not reflow their row.
+The particle ramp and the HUD legend both read `SPEED_STOPS` from
+`windField.js`, so they cannot drift apart.
 
-The HUD is a plain DOM overlay with `pointer-events: none`; only the compass
-button opts back in.
+## Known bugs, pre-empted
 
-The particle colour ramp and the HUD legend read from the same `SPEED_STOPS`
-array in `windField.js`, so the two cannot drift apart. Its low stop is tuned to
-stay visible over sunlit land - a near-black "calm" colour disappears against
-the basemap under additive blending.
+Each is fixed in the code as shipped. The table exists so the reasoning is not
+lost the next time someone "simplifies" one of them.
 
-## Controls
-
-- **Drag** to rotate, **scroll** or the **+ / -** buttons to zoom. Zoom steps are
-  multiplicative, so each press covers the same proportion of the remaining
-  distance - a fixed step is a nudge when far out and a lurch when already close.
-- Auto-rotate resumes after 3.5 s idle.
-- **Compass button** resets to north, the way Google Earth's compass behaves: it
-  levels the tilt so the pole points up the screen, without teleporting you to a
-  different part of the world. OrbitControls never rolls the camera, so the polar
-  angle is the only thing that can put north off-vertical - that is animated back
-  to the equator while azimuth and zoom are left exactly where you left them.
-- All camera animations (flight, reset, zoom) share **one** animation slot, so
-  starting any of them cancels the others instead of two of them fighting over
-  the camera. A manual drag cancels whatever is running.
-
-### Zoom limits are set by the texture, not by feel
-
-The basemap is 4096 px around 360° of longitude - about 652 px per world unit at
-the equator. With a 42° vertical FOV, magnification passes 1:1 at roughly
-`distance = 2.8` on a 900 px-tall window, which is far enough out that enforcing
-it strictly would forbid zooming at all. `minDistance` is therefore **1.75**,
-capping magnification at about 2.5×, which linear filtering plus anisotropy carry
-without the texture visibly breaking into texels.
-
-## City search
-
-Open-Meteo's geocoding API (`geocoding-api.open-meteo.com`), same provider, still
-no key. Typing is debounced 300 ms and completed queries are cached, so spelling
-"Springfield" costs **one** request, not eleven.
-
-Results **always** show region and country. There is deliberately no path that
-jumps to the top hit when several matches exist - "Springfield" matches a dozen
-real places, and silently flying to the most populous one is a wrong answer
-delivered confidently.
-
-Selecting a result fires a **separate single-point** request for that city's
-current conditions. This is intentionally not reconciled with the ambient grid:
-the grid is 10° spacing (~1,100 km between samples), so its interpolated value at
-a city is a smoothed regional field, not that city's weather. The two are allowed
-to disagree, and the marker badge is labelled "current conditions" to say which
-one is being read.
-
-The marker is a **locator reticle, not a city boundary**. Real administrative
-limits need a separate polygon dataset (Natural Earth, OSM boundaries) that the
-weather API does not carry - a valid future enhancement, out of scope here.
-
-## Weather layers
-
-All six read from the *same* batched 612-point grid request as the wind field -
-`weather_code`, `precipitation`, `cloud_cover` and `temperature_2m` were added to
-the existing call, so the extra layers cost zero additional API budget.
-
-| Layer | Rendering | Why it is not a recolour |
-|---|---|---|
-| Wind | Point trails along the interpolated vector field | - |
-| Rain | `LineSegments` anchored to the radial | A line has an axis; anchoring it to "straight down" reads as falling from any camera angle |
-| Thunderstorm | Rain's motion, plus flash sprites | Each cell owns its countdown and duration, so storms never strobe in unison |
-| Snow | Round points, ⅓ the fall speed, per-flake lateral wander | Recolouring rain white just produces white rain |
-| Clear | Cool additive wash over clear cells | "Clear" is a reported state; drawing nothing would look like missing data |
-| Clouds | Translucent white shell, opacity from `cloud_cover` | Coverage is a state, not a particle phenomenon |
-
-Layers are capped at **3 at once** (1 in reduced-quality mode). Going past the cap
-drops the *oldest* selection rather than rejecting the tap - a button that
-visibly does nothing reads as broken.
-
-Each layer is **unmounted** when toggled off, not hidden. Unmounting is the
-pause: a hidden-but-mounted layer keeps running its `useFrame` simulation and
-costs exactly as much as a visible one.
-
-Clouds and Clear are **off by default**, so the globe on load looks exactly as it
-does without this phase.
-
-### A note on the sunny glow
-
-The brief specified a *warm* rim-light for clear sky. It is implemented cool
-(`#cfeaff`) instead: a warm gold accent would introduce a second colour
-temperature competing with the blue basemap and the cyan wind ramp. Change
-`GLOW_COLOUR` in `SunnyGlow.jsx` if you want the literal reading.
-
-### WMO code buckets
-
-`utils/weatherCodes.js` maps codes as explicit sets, not ranges. The numbering is
-not contiguous by condition - 77 (snow grains) sits between 71-75 (snowfall) and
-85-86 (snow showers) - so "code > 70 means snow" style shortcuts misclassify.
-Codes 56/57 (freezing drizzle) are absent from the brief's list and are grouped
-with rain here, since they are precipitation and would otherwise render as
-nothing.
-
-The particle colour ramp and the HUD legend read from the same `SPEED_STOPS`
-array in `windField.js`, so the two cannot drift apart.
+| Issue | Fix |
+|---|---|
+| Blank canvas, no error | `useLoader` suspends - the `<Suspense>` boundary lives in `App.jsx`. |
+| Texture 404 / CORS | CDN URL verified before wiring it in. three.js `examples/textures/planets/...` paths on unpkg and jsdelivr now **404** - not published in the npm package. |
+| Texture fails anyway | A thrown loader error does not land in a Suspense fallback; `Globe.jsx` has a real error boundary. |
+| Janky particles | `BufferAttribute` arrays mutated in `useFrame`. Per-frame positions in `useState` would re-render at 60 Hz. |
+| Duplicate fetch in dev | StrictMode double-invoke. A per-component ref cannot stop it - its cleanup runs before the second mount - so both hooks dedupe at **module scope**. |
+| Blocky motion | Bilinear interpolation of `u`/`v`, never nearest-neighbour or angle averaging. |
+| Breakage at poles / antimeridian | Hard exclusion at ±80° with a fade from ±66°; longitude wraps circularly. |
+| Rate limit returns **200** | The reply is `{error: true, reason}` and can arrive with a 200, so the body shape is validated, not just `response.ok`. |
+| Refresh fails after a good fetch | Last good field is kept and the HUD flags it, rather than discarding live data. |
+| API unreachable | Synthetic banded-zonal-flow field for wind, procedural two-pole ring for aurora. The globe is never empty and the HUD says which you are seeing. |
+| Canvas jumps on resize | `<Canvas>` owns resize. Nothing else calls `setSize`/`setPixelRatio`. |
+| Camera flies through the globe, or the long way round | Quaternion slerp of the camera *direction*. Lerping lat/lon sends 175°E → 175°W the 350° way; lerping xyz cuts a chord through the interior. |
+| Geocoding "no match" crashes | A no-result query answers **200 with `results` absent entirely**, not an empty array. |
+| Out-of-order search responses | Each lookup carries a request id; stale responses are discarded. |
+| Frame drops from layers toggled off | Layers are unmounted, not hidden, so their `useFrame` stops entirely. |
+| Auto-rotate fights a camera animation | Disabled for the duration of any animation, re-armed only by the idle timer. |
+| Grid layers misaligned half a cell | Textures correct for the half-texel offset and rescale sphere V from ±90° to the grid's ±80°. |
+| **Aurora** oval in the wrong hemisphere | OVATION indexes latitude from -90 up, but canvas row 0 is the image *top*, which `flipY` maps to `uv.y = 1`, which `SphereGeometry` puts at the **north** pole - so the rasteriser walks the grid backwards. Mirroring parks the northern oval over Antarctica, plausible enough to survive a casual glance. Verified against the geometry: lat +90 → `v` 1.000. |
+| **Aurora** terminator in the wrong place | Derived from an absolute instant (`Date.now()` → Julian days), never `getHours()`. Local time rotates the terminator by the viewer's UTC offset - up to 210° - and looks fine to anyone testing in UTC+0. Verified against the solstices (±23.44°) and the equation of time. |
+| **Aurora** night side crushes to black | The `onBeforeCompile` patch goes after `<opaque_fragment>` (linear), not after `<dithering_fragment>` (already sRGB-encoded). |
+| **Aurora** flicker when switching modes | One persistent `<Canvas>`; mode is derived and the crossfade runs through a ref, so nothing above the canvas changes. |
+| **Aurora** camera flies to the quiet pole | The poleward ease is **deferred until the grid is live**, then aimed at the stronger hemisphere. Aiming on the press uses the default hemisphere, and a corrective second ease cannot work - by then the camera is already poleward and the "leave the user alone" guard declines it. |
+| **Aurora** wind particles still costing frames | Two levels: `WindParticles` returns from `useFrame` before any advection once faded, and `App.jsx` then unmounts it entirely. |
+| **Aurora** frame hitch on the 924 KB parse | Fetch, parse and rasterise all happen in effects keyed to the data. Nothing touches the network or the grid inside `useFrame`. |
+| **Aurora** mode and chips disagree | Mode is derived from `activeLayers`, not stored beside it. |
 
 ## Notes
 
 - The JS bundle is ~1.1 MB (~300 KB gzipped), almost entirely Three.js. Fine for
-  a static portfolio piece; code-split if that ever stops being true.
-- The Earth texture is NASA Blue Marble at 4096×2048 (~1.4 MB), the single
-  heaviest asset and the one thing loaded from a CDN at runtime. The 93 KB
-  `earth-dark.jpg` alternative is far lighter but renders as near-black
-  landmasses that are illegible on a dark background; readability won. Self-host
-  it if you would rather not depend on jsDelivr.
-- The atmosphere glow is a Fresnel shader on a back-faced shell, not a
-  translucent sphere. A uniform-opacity shell renders as a flat disc with a hard
-  circular edge, which reads as a grey ring around the planet.
-- Wind is 10 m above ground and updates upstream every 15 minutes, so a 30-minute
-  refresh is comfortably inside the data's own resolution.
-
-## Out of scope (Phase 2)
-
-No aurora layer, no NOAA aurora data, no dark-mode toggle. No routing, backend,
-login, or analytics.
+  a static portfolio piece; code-split if that stops being true.
+- The Earth texture is NASA Blue Marble at 4096×2048 (~1.4 MB), the heaviest
+  asset and the only thing loaded from a CDN at runtime. The 93 KB `earth-dark.jpg`
+  alternative is lighter but renders as near-black landmasses that are illegible
+  on a dark background; readability won.
+- The atmosphere glow is a Fresnel shader on a back-faced shell. A
+  uniform-opacity shell renders as a flat disc with a hard edge, which reads as a
+  grey ring around the planet.
+- Out of scope: routing, backend, login, analytics.

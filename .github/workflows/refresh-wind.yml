@@ -1,0 +1,89 @@
+name: Refresh wind snapshot
+
+# Rebuilds the site with a fresh wind grid and publishes it to the `gh` branch.
+#
+# This is the whole point of the static-snapshot design: the global wind grid is
+# identical for every visitor, and Open-Meteo weights a request by the data it
+# returns, so our 612-location call costs several hundred of a 10,000/day
+# allowance. Fetched per visitor that is ~17 page loads a day for the entire
+# site; fetched here it is 8 calls a day total, no matter how many people visit.
+#
+# Open-Meteo data is CC BY 4.0, so caching and re-serving it is permitted with
+# attribution (see the HUD and README).
+
+on:
+  schedule:
+    # Every 3 hours. Deliberately not tighter: 8 runs a day sits well inside the
+    # daily allowance with room for manual deploys, and surface wind does not
+    # change fast enough on a spinning globe to justify more. GitHub's scheduler
+    # is best-effort and can run late, which is why the app trusts a snapshot for
+    # 8 hours before falling back to a live request.
+    - cron: '0 */3 * * *'
+  # So a stale snapshot can be fixed without waiting for the next slot.
+  workflow_dispatch:
+
+# Only what is needed to push the built site to the `gh` branch.
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-wind
+  # Queue rather than cancel: a half-finished gh-pages push is worse than a
+  # slightly delayed one.
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        # gh-pages pushes over this remote, so the checkout credentials have to
+        # stay available to the later step.
+        with:
+          persist-credentials: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # public/wind-grid.json is gitignored, so a fresh checkout never has one
+      # and the script's freshness guard cannot short-circuit here.
+      - name: Fetch wind snapshot
+        run: npm run wind:fetch
+
+      # Fails the job if the snapshot is missing, so a silently dataless deploy
+      # shows up as a red run instead of a site that quietly went back to
+      # calling the API from every visitor's browser.
+      - name: Verify snapshot exists
+        run: |
+          test -s public/wind-grid.json || {
+            echo "::error::No wind snapshot was written; refusing to deploy without one."
+            exit 1
+          }
+          node -e "
+            const s = require('./public/wind-grid.json');
+            if (!Array.isArray(s.samples) || s.filled < 1) throw new Error('snapshot has no samples');
+            console.log('snapshot ok:', s.filled, 'points, observed', s.observed);
+          "
+
+      - name: Build
+        run: npx vite build
+
+      - name: Publish to gh branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npx gh-pages -d dist -b gh -t --nojekyll -m "Refresh wind snapshot"
+
+      # A deploy with no source change is a silent no-op: Vite content-hashes
+      # asset names, so identical input rebuilds byte-identical output, git finds
+      # nothing to commit and Pages never rebuilds. gh-pages still prints
+      # "Published" and exits 0. The snapshot changes every run so this should
+      # always publish, and the relative date below is how to tell.
+      - name: Report published head
+        run: |
+          git fetch -q origin gh
+          git --no-pager log -1 --format="gh branch is now: %h %s (%cr)" origin/gh

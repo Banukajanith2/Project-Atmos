@@ -4,9 +4,10 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build && npm run deploy",
-    "build:only": "vite build",
+    "dev": "npm run wind:fetch && vite",
+    "build": "npm run build:only && npm run deploy",
+    "build:only": "npm run wind:fetch && vite build",
+    "wind:fetch": "node --import ./scripts/loader.mjs scripts/fetch-wind.mjs",
     "preview": "vite preview",
     "deploy": "gh-pages -d dist -b gh -t --nojekyll -m \"Deploy build\" && git fetch -q origin gh && git --no-pager log -1 --format=\"gh branch is now: %h %s (%cr)\" origin/gh"
   },

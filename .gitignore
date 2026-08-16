@@ -1,6 +1,11 @@
 node_modules/
 dist/
 .vite/
+
+# Build artefact, refreshed by scripts/fetch-wind.mjs on every build and by the
+# scheduled workflow. Committing it would add a large churning blob to history
+# for data that is regenerated anyway.
+public/wind-grid.json
 *.local
 .DS_Store
 

@@ -15,7 +15,11 @@ npm run dev        # http://localhost:5173
 npm run build:only # -> dist/, static files only
 npm run build      # build AND deploy to the gh branch
 npm run preview    # serve the production build locally
+npm run wind:fetch # refresh the wind snapshot (add --force to ignore the age guard)
 ```
+
+`dev` and `build` both refresh the wind snapshot first, skipping it if the
+existing one is under an hour old so repeated builds do not burn API quota.
 
 Deploys as-is to any static host. No server runtime, no environment variables.
 `base: './'` in `vite.config.js` is required - this is a project site served from
@@ -45,12 +49,54 @@ trusting array position.
 
 OVATION is 924 KB of flat `[lon, lat, probability]` triples: 65,160 points,
 **longitude-major**, lon 0-359 unsigned, lat -90 to 90 inclusive. Verified to send
-`access-control-allow-origin: *`. Fetched lazily - a user who never opens Aurora
-never pays for it.
+`access-control-allow-origin: *`. Fetched lazily, so a user who never opens
+Aurora never pays for it.
+
+### The wind grid is fetched at build time, not by visitors
+
+Open-Meteo weights a request by the data it returns, roughly
+`nLocations * (nDays / 14) * (nVariables / 10)`. Asking for 612 locations means
+**one HTTP request costs several hundred calls** against a 10,000/day allowance.
+Fetched per visitor that works out at roughly **17 page loads per day for the
+entire site** before wind data stops working for everybody. That is not a stingy
+API, it is the wrong shape: the global grid is byte-identical for every visitor,
+so having each browser fetch it is pure duplication.
+
+So `scripts/fetch-wind.mjs` fetches it once at build time and writes
+`public/wind-grid.json` (~14 KB), which Vite copies into `dist/`. A scheduled
+workflow rebuilds and republishes every 3 hours. **Runtime API calls: zero**, so
+visitor count stops mattering entirely, and the page loads faster because it
+reads a local file instead of making a cross-origin round trip.
+
+This is what [earth.nullschool.net](https://github.com/cambecc/earth), the site
+this one is modelled on, has always done: it pre-converts GFS to static JSON and
+has no runtime weather API at all.
+
+`useWindData` loads in three tiers, so nothing is a single point of failure:
+
+| Tier | Source | When |
+|---|---|---|
+| 1 | `wind-grid.json` | Normal. HUD pill reads **Snapshot**. |
+| 2 | Live Open-Meteo request | Snapshot missing or over 8 hours old. Pill reads **Live**. |
+| 3 | Synthetic banded field | Network unreachable. Pill reads **Offline data**. |
+
+Tier 2 is the old behaviour, kept as a safety net rather than deleted, so a
+`vite dev` run or a deploy that skipped the snapshot step still shows real
+weather. Caching and re-serving is permitted: Open-Meteo data is **CC BY 4.0**,
+attribution given here and in the snapshot file itself.
+
+The aurora is **not** pre-baked. NOAA SWPC has no comparable quota and the data
+is only useful fresh, so it stays a live 5-minute fetch.
 
 ## Architecture
 
 ```
+.github/workflows/
+  refresh-wind.yml          3-hourly: refetch the grid, rebuild, republish
+scripts/
+  fetch-wind.mjs            build-time wind snapshot -> public/wind-grid.json
+  loader.mjs                registers the resolve hook below
+  extensionless-hooks.mjs   lets Node import src/'s extensionless imports
 src/
   App.jsx                   Canvas, Suspense boundary, adaptive quality, mode crossfade
   components/
@@ -67,13 +113,14 @@ src/
     FilterPanel.jsx         layer toggles, including the exclusive Aurora chip
     HUD.jsx                 plain DOM overlay - deliberately not inside <Canvas>
   hooks/
-    useWindData.js          grid fetch + cache + interval refetch + fallback
+    useWindData.js          snapshot -> live -> synthetic, cache, interval refetch
     useAuroraData.js        OVATION fetch + cache + 5-minute refetch + fallback
     useSunPosition.js       subsolar point from UTC, for the terminator
     useCitySearch.js        debounced geocoding
     useCityWeather.js       single-point precise fetch
   utils/
     windField.js            grid, vector math, bilinear interpolation, colour ramp
+    windRequest.js          the batched request + response and snapshot codecs
     auroraGrid.js           probability grid -> blurred canvas texture
     weatherCodes.js         WMO code -> condition buckets
     cameraFlight.js         great-circle camera interpolation
@@ -210,39 +257,6 @@ is plain DOM with `pointer-events: none`; only controls opt back in.
 
 The particle ramp and the HUD legend both read `SPEED_STOPS` from
 `windField.js`, so they cannot drift apart.
-
-## Known bugs, pre-empted
-
-Each is fixed in the code as shipped. The table exists so the reasoning is not
-lost the next time someone "simplifies" one of them.
-
-| Issue | Fix |
-|---|---|
-| Blank canvas, no error | `useLoader` suspends - the `<Suspense>` boundary lives in `App.jsx`. |
-| Texture 404 / CORS | CDN URL verified before wiring it in. three.js `examples/textures/planets/...` paths on unpkg and jsdelivr now **404** - not published in the npm package. |
-| Texture fails anyway | A thrown loader error does not land in a Suspense fallback; `Globe.jsx` has a real error boundary. |
-| Janky particles | `BufferAttribute` arrays mutated in `useFrame`. Per-frame positions in `useState` would re-render at 60 Hz. |
-| Duplicate fetch in dev | StrictMode double-invoke. A per-component ref cannot stop it - its cleanup runs before the second mount - so both hooks dedupe at **module scope**. |
-| Blocky motion | Bilinear interpolation of `u`/`v`, never nearest-neighbour or angle averaging. |
-| Breakage at poles / antimeridian | Hard exclusion at ±80° with a fade from ±66°; longitude wraps circularly. |
-| Rate limit returns **200** | The reply is `{error: true, reason}` and can arrive with a 200, so the body shape is validated, not just `response.ok`. |
-| Refresh fails after a good fetch | Last good field is kept and the HUD flags it, rather than discarding live data. |
-| API unreachable | Synthetic banded-zonal-flow field for wind, procedural two-pole ring for aurora. The globe is never empty and the HUD says which you are seeing. |
-| Canvas jumps on resize | `<Canvas>` owns resize. Nothing else calls `setSize`/`setPixelRatio`. |
-| Camera flies through the globe, or the long way round | Quaternion slerp of the camera *direction*. Lerping lat/lon sends 175°E → 175°W the 350° way; lerping xyz cuts a chord through the interior. |
-| Geocoding "no match" crashes | A no-result query answers **200 with `results` absent entirely**, not an empty array. |
-| Out-of-order search responses | Each lookup carries a request id; stale responses are discarded. |
-| Frame drops from layers toggled off | Layers are unmounted, not hidden, so their `useFrame` stops entirely. |
-| Auto-rotate fights a camera animation | Disabled for the duration of any animation, re-armed only by the idle timer. |
-| Grid layers misaligned half a cell | Textures correct for the half-texel offset and rescale sphere V from ±90° to the grid's ±80°. |
-| **Aurora** oval in the wrong hemisphere | OVATION indexes latitude from -90 up, but canvas row 0 is the image *top*, which `flipY` maps to `uv.y = 1`, which `SphereGeometry` puts at the **north** pole - so the rasteriser walks the grid backwards. Mirroring parks the northern oval over Antarctica, plausible enough to survive a casual glance. Verified against the geometry: lat +90 → `v` 1.000. |
-| **Aurora** terminator in the wrong place | Derived from an absolute instant (`Date.now()` → Julian days), never `getHours()`. Local time rotates the terminator by the viewer's UTC offset - up to 210° - and looks fine to anyone testing in UTC+0. Verified against the solstices (±23.44°) and the equation of time. |
-| **Aurora** night side crushes to black | The `onBeforeCompile` patch goes after `<opaque_fragment>` (linear), not after `<dithering_fragment>` (already sRGB-encoded). |
-| **Aurora** flicker when switching modes | One persistent `<Canvas>`; mode is derived and the crossfade runs through a ref, so nothing above the canvas changes. |
-| **Aurora** camera flies to the quiet pole | The poleward ease is **deferred until the grid is live**, then aimed at the stronger hemisphere. Aiming on the press uses the default hemisphere, and a corrective second ease cannot work - by then the camera is already poleward and the "leave the user alone" guard declines it. |
-| **Aurora** wind particles still costing frames | Two levels: `WindParticles` returns from `useFrame` before any advection once faded, and `App.jsx` then unmounts it entirely. |
-| **Aurora** frame hitch on the 924 KB parse | Fetch, parse and rasterise all happen in effects keyed to the data. Nothing touches the network or the grid inside `useFrame`. |
-| **Aurora** mode and chips disagree | Mode is derived from `activeLayers`, not stored beside it. |
 
 ## Notes
 

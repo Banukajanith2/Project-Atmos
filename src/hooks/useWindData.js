@@ -1,61 +1,52 @@
 import { useCallback, useEffect, useState } from 'react';
-import { buildGrid, createWindField, syntheticSamples, GRID_POINTS } from '../utils/windField';
-
-const ENDPOINT = 'https://api.open-meteo.com/v1/forecast';
-const REFETCH_MS = 30 * 60 * 1000; // surface wind updates every 15 min upstream
-const REQUEST_TIMEOUT_MS = 20000;
-
-const { lats, lons } = buildGrid();
-// Every weather layer reads from this one request. Adding fields to the
-// existing batched call costs nothing extra against the rate limit; a second
-// endpoint per layer would multiply it.
-const CURRENT_FIELDS = [
-  'wind_speed_10m',
-  'wind_direction_10m',
-  'weather_code',
-  'precipitation',
-  'cloud_cover',
-  'temperature_2m',
-].join(',');
-
-const REQUEST_URL =
-  `${ENDPOINT}?latitude=${lats.join(',')}` +
-  `&longitude=${lons.join(',')}` +
-  `&current=${CURRENT_FIELDS}`;
+import { createWindField, syntheticSamples, GRID_POINTS } from '../utils/windField';
+import { REQUEST_URL, samplesFromResponse, decodeSamples } from '../utils/windRequest';
 
 /**
- * Open-Meteo answers a batched request with an array in request order, and each
- * entry after the first carries a zero-based `location_id`. We key off that id
- * where present rather than trusting position alone, so a reordered or short
- * response degrades to "some points calm" instead of a globally rotated field.
+ * Wind grid loading, in three tiers.
+ *
+ *   1. `wind-grid.json`, a static snapshot baked into the deploy.
+ *   2. A live Open-Meteo request, if that file is missing or too old.
+ *   3. A synthetic climatological field, if the network fails entirely.
+ *
+ * Tier 1 exists because Open-Meteo weights a request by the data it returns,
+ * roughly `nLocations * (nDays / 14) * (nVariables / 10)`. This grid asks for 612
+ * locations, so one HTTP request costs several hundred calls against a
+ * 10,000/day allowance - roughly 17 page loads per day for the whole site before
+ * wind data stops working for everyone. The grid is byte-identical for every
+ * visitor, so fetching it per visitor was always the wrong shape. Reading a
+ * static file instead makes runtime API usage zero and the visitor count
+ * irrelevant.
+ *
+ * Tier 2 is kept as a safety net rather than deleted: a deploy that skipped the
+ * snapshot step, or a `vite dev` run without one, still shows real weather. It
+ * is the old behaviour, demoted.
  */
-function samplesFromResponse(payload) {
-  const samples = new Array(GRID_POINTS).fill(null);
-  let filled = 0;
 
-  payload.forEach((entry, position) => {
-    const index = Number.isInteger(entry?.location_id) ? entry.location_id : position;
-    if (index < 0 || index >= GRID_POINTS) return;
-    const current = entry?.current;
-    if (!current) return;
-    const speedKmh = current.wind_speed_10m;
-    const directionDeg = current.wind_direction_10m;
-    if (!Number.isFinite(speedKmh) || !Number.isFinite(directionDeg)) return;
-    samples[index] = {
-      speedKmh,
-      directionDeg,
-      // Optional: a point missing these still contributes valid wind rather
-      // than being discarded outright.
-      weatherCode: current.weather_code,
-      precipitation: current.precipitation,
-      cloudCover: current.cloud_cover,
-      temperature: current.temperature_2m,
-    };
-    filled++;
-  });
+/**
+ * Relative to the document, so the same build works at the `/Project-Atmos/`
+ * subpath, at a domain root, and on any other static host - the same reason
+ * `base: './'` is set in the Vite config.
+ */
+const SNAPSHOT_URL = `${import.meta.env.BASE_URL}wind-grid.json`;
 
-  return { samples, filled };
-}
+/**
+ * How long a snapshot is trusted before falling through to a live request.
+ *
+ * The scheduled workflow refreshes every 3 hours, so this allows two missed runs
+ * before a visitor pays for a live call. Set too tight, a single late GitHub
+ * Actions run would send every visitor back to the API and undo the point of the
+ * exercise.
+ */
+const SNAPSHOT_MAX_AGE_MS = 8 * 60 * 60 * 1000;
+
+/** Only meaningful in tier 2. Tier 1 refreshes when the site redeploys. */
+const REFETCH_MS = 30 * 60 * 1000;
+
+/** Tier 1's real cadence: the cron in `.github/workflows/refresh-wind.yml`. */
+const SNAPSHOT_REFRESH_MS = 3 * 60 * 60 * 1000;
+
+const REQUEST_TIMEOUT_MS = 20000;
 
 /* ------------------------------------------------------------------ *
  * Module-level request cache.
@@ -72,42 +63,81 @@ function samplesFromResponse(payload) {
  * ------------------------------------------------------------------ */
 
 let pending = null;
-let cached = null; // { field, observedAt, filled, at }
+let cached = null; // { field, observedAt, filled, at, source }
+
+async function requestWithTimeout(url) {
+  const controller = new AbortController();
+  // AbortController's real job here: bounding a hung connection, which an
+  // overloaded or rate-limited upstream will otherwise leave open forever.
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const payload = await response.json().catch(() => null);
+    return { response, payload };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/** Tier 1. Resolves null when there is no usable snapshot, rather than throwing. */
+async function loadSnapshot() {
+  try {
+    const { response, payload } = await requestWithTimeout(SNAPSHOT_URL);
+    if (!response.ok || !payload) return null;
+
+    const stamp = Date.parse(payload.reusedAt || payload.generated);
+    if (Number.isFinite(stamp) && Date.now() - stamp > SNAPSHOT_MAX_AGE_MS) return null;
+
+    const { samples, filled } = decodeSamples(payload.samples);
+    if (filled === 0) return null;
+
+    return {
+      field: createWindField(samples),
+      observedAt: payload.observed ?? null,
+      filled,
+      at: stamp || Date.now(),
+      source: 'snapshot',
+    };
+  } catch {
+    // A missing file is the normal case in `vite dev`, not an error worth
+    // surfacing. Falling through to tier 2 is the whole point.
+    return null;
+  }
+}
+
+/** Tier 2. Throws on failure so the caller can fall through to tier 3. */
+async function requestLiveGrid() {
+  const { response, payload } = await requestWithTimeout(REQUEST_URL);
+
+  if (!response.ok) {
+    throw new Error(payload?.reason || `HTTP ${response.status}`);
+  }
+  // A rate-limit reply arrives as {error: true, reason: "..."} - and can do so
+  // with a 200, so response.ok alone is not enough to trust the body.
+  if (!Array.isArray(payload)) {
+    throw new Error(payload?.reason || 'Unexpected response shape');
+  }
+
+  const { samples, filled } = samplesFromResponse(payload);
+  if (filled === 0) throw new Error('Response contained no usable wind samples');
+
+  return {
+    field: createWindField(samples),
+    observedAt: payload[0]?.current?.time ?? null,
+    filled,
+    at: Date.now(),
+    source: 'live',
+  };
+}
 
 function requestGrid() {
   if (pending) return pending;
 
   pending = (async () => {
-    const controller = new AbortController();
-    // AbortController's real job here: bounding a hung connection, which an
-    // overloaded or rate-limited upstream will otherwise leave open forever.
-    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
     try {
-      const response = await fetch(REQUEST_URL, { signal: controller.signal });
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(payload?.reason || `HTTP ${response.status}`);
-      }
-      // A rate-limit reply arrives as {error: true, reason: "..."} - and can do
-      // so with a 200, so response.ok alone is not enough to trust the body.
-      if (!Array.isArray(payload)) {
-        throw new Error(payload?.reason || 'Unexpected response shape');
-      }
-
-      const { samples, filled } = samplesFromResponse(payload);
-      if (filled === 0) throw new Error('Response contained no usable wind samples');
-
-      cached = {
-        field: createWindField(samples),
-        observedAt: payload[0]?.current?.time ?? null,
-        filled,
-        at: Date.now(),
-      };
+      cached = (await loadSnapshot()) || (await requestLiveGrid());
       return cached;
     } finally {
-      clearTimeout(timeout);
       pending = null;
     }
   })();
@@ -115,23 +145,23 @@ function requestGrid() {
   return pending;
 }
 
+const stateFrom = (result) => ({
+  field: result.field,
+  status: result.source, // 'snapshot' | 'live'
+  error: null,
+  updatedAt: result.at,
+  observedAt: result.observedAt,
+  filled: result.filled,
+});
+
 /**
- * Fetches the global wind grid once, caches it, and refreshes on an interval.
- *
  * Never call this from inside `useFrame` - one request covers the whole globe
  * and the particle system reads the cached field, not the network.
  */
 export function useWindData() {
   const [state, setState] = useState(() =>
     cached
-      ? {
-          field: cached.field,
-          status: 'live',
-          error: null,
-          updatedAt: cached.at,
-          observedAt: cached.observedAt,
-          filled: cached.filled,
-        }
+      ? stateFrom(cached)
       : {
           field: createWindField(syntheticSamples()),
           status: 'loading',
@@ -146,25 +176,21 @@ export function useWindData() {
     try {
       const result = await requestGrid();
       if (isStale()) return;
-      setState({
-        field: result.field,
-        status: 'live',
-        error: null,
-        updatedAt: result.at,
-        observedAt: result.observedAt,
-        filled: result.filled,
-      });
+      setState(stateFrom(result));
     } catch (err) {
       if (isStale()) return;
       // Keep the globe populated. A visibly synthetic field beats an empty
       // sphere, as long as the HUD says which one you are looking at. If we
-      // already had live data, keep it and just flag the failed refresh.
-      setState((prev) => ({
-        ...prev,
-        field: prev.status === 'live' ? prev.field : createWindField(syntheticSamples()),
-        status: prev.status === 'live' ? 'live' : 'fallback',
-        error: err?.message || 'Wind data request failed',
-      }));
+      // already had real data, keep it and just flag the failed refresh.
+      setState((prev) => {
+        const hadRealData = prev.status === 'live' || prev.status === 'snapshot';
+        return {
+          ...prev,
+          field: hadRealData ? prev.field : createWindField(syntheticSamples()),
+          status: hadRealData ? prev.status : 'fallback',
+          error: err?.message || 'Wind data request failed',
+        };
+      });
     }
   }, []);
 
@@ -174,19 +200,20 @@ export function useWindData() {
 
     // A cached grid that is still fresh is reused as-is - no request at all.
     if (cached && Date.now() - cached.at < REFETCH_MS) {
-      setState({
-        field: cached.field,
-        status: 'live',
-        error: null,
-        updatedAt: cached.at,
-        observedAt: cached.observedAt,
-        filled: cached.filled,
-      });
+      setState(stateFrom(cached));
     } else {
       load(isStale);
     }
 
     const id = setInterval(() => {
+      // Only tier 2 has anything to poll for. A snapshot changes when the site
+      // redeploys, so re-requesting the same static file on a timer would be
+      // pure waste - and clearing the cache would re-run the whole tier chain,
+      // which can escalate a perfectly good snapshot into a live API call.
+      //
+      // Checked here rather than when the effect runs, because on first mount
+      // the load is still in flight and `cached` is not populated yet.
+      if (cached?.source === 'snapshot') return;
       cached = null; // force the next request past the freshness check
       load(isStale);
     }, REFETCH_MS);
@@ -197,5 +224,11 @@ export function useWindData() {
     };
   }, [load]);
 
-  return { ...state, refetchMs: REFETCH_MS, gridPoints: GRID_POINTS };
+  return {
+    ...state,
+    // Reported so the HUD states the cadence that actually applies to whichever
+    // tier is on screen, rather than a fixed number that is wrong half the time.
+    refetchMs: state.status === 'snapshot' ? SNAPSHOT_REFRESH_MS : REFETCH_MS,
+    gridPoints: GRID_POINTS,
+  };
 }

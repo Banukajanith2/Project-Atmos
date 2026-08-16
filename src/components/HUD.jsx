@@ -8,6 +8,12 @@ const STATUS_LABEL = {
   idle: 'Standby',
   loading: 'Connecting',
   live: 'Live',
+  // Real observed weather, just fetched at deploy time rather than by this
+  // browser. Named rather than folded into "Live" because the Observed row
+  // beside it can legitimately read a couple of hours old, and a pill claiming
+  // "Live" over a three-hour-old timestamp is the kind of small dishonesty that
+  // makes a reader distrust the rest of the panel.
+  snapshot: 'Snapshot',
   fallback: 'Offline data',
 };
 
@@ -22,6 +28,15 @@ function formatObserved(iso) {
   // NOAA stamps a trailing Z that Open-Meteo omits; strip it so the two sources
   // render identically rather than one reading "05:50:00Z UTC".
   return `${date} · ${time.replace('Z', '').slice(0, 5)} UTC`;
+}
+
+/** Refresh cadences now span 5 minutes to 3 hours; "180 minutes" reads badly. */
+function formatCadence(ms) {
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) return `${minutes} minutes`;
+  const hours = minutes / 60;
+  const rounded = Number.isInteger(hours) ? hours : hours.toFixed(1);
+  return `${rounded} ${hours === 1 ? 'hour' : 'hours'}`;
 }
 
 /** Subsolar point, as a plain compass-signed lat/lon pair. */
@@ -137,10 +152,7 @@ export default function HUD({
             <Stat label="Forecast" value={formatObserved(aurora.forecastAt)} />
             <Stat label="Peak chance" value={`${Math.round(aurora.peak || 0)}%`} />
             <Stat label="Subsolar point" value={formatLatLon(sun)} />
-            <Stat
-              label="Refreshes every"
-              value={`${Math.round(aurora.refetchMs / 60000)} minutes`}
-            />
+            <Stat label="Refreshes every" value={formatCadence(aurora.refetchMs)} />
           </div>
         </section>
       ) : (
@@ -153,7 +165,7 @@ export default function HUD({
             <Stat label="Observed" value={formatObserved(observedAt)} />
             <Stat label="Retrieved" value={formatClock(updatedAt)} />
             <Stat label="Coverage" value={`${filled || 0} of ${gridPoints} points`} />
-            <Stat label="Refreshes every" value={`${Math.round(refetchMs / 60000)} minutes`} />
+            <Stat label="Refreshes every" value={formatCadence(refetchMs)} />
           </div>
         </section>
       )}
@@ -271,7 +283,7 @@ export default function HUD({
             {error ? ` ${error}` : ''}
           </p>
         )}
-        {!isAurora && status === 'live' && error && (
+        {!isAurora && (status === 'live' || status === 'snapshot') && error && (
           <p className="notice notice--warn">
             <strong>Refresh failed.</strong> Showing the last good reading. {error}
           </p>

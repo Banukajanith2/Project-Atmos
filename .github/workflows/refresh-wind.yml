@@ -72,11 +72,37 @@ jobs:
       - name: Build
         run: npx vite build
 
+      # gh-pages does not push from this checkout. It runs a fresh `git clone`
+      # into node_modules/.cache/gh-pages and pushes from there, and that clone
+      # is a separate repository, so it inherits neither of the two things it
+      # needs from here:
+      #
+      #   Credentials. actions/checkout installs a token as an
+      #   `http.extraheader` in *this* checkout's .git/config. The cache clone
+      #   never sees it, git falls back to prompting for a username, and a runner
+      #   has no terminal to answer on: "fatal: could not read Username for
+      #   'https://github.com': No such device or address". Fixed by handing
+      #   gh-pages an already-authenticated URL with `-r`. Actions masks
+      #   GITHUB_TOKEN in logs.
+      #
+      #   Identity. A plain `git config user.name` here writes to this checkout
+      #   only, so the clone would commit with no author. It has to be `--global`,
+      #   which every repository on the runner inherits. Note gh-pages' own `-u`
+      #   flag is not usable for this: it parses the value as an RFC 5322 address
+      #   and rejects the square brackets in "github-actions[bot]".
       - name: Publish to gh branch
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          npx gh-pages -d dist -b gh -t --nojekyll -m "Refresh wind snapshot"
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npx gh-pages \
+            -d dist \
+            -b gh \
+            -t \
+            --nojekyll \
+            -m "Refresh wind snapshot" \
+            -r "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
       # A deploy with no source change is a silent no-op: Vite content-hashes
       # asset names, so identical input rebuilds byte-identical output, git finds
